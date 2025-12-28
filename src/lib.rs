@@ -488,6 +488,8 @@ impl State {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
+
+            self.camera.aspect = self.config.width as f32 / self.config.height as f32;
         }
     }
 
