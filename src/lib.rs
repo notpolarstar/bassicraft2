@@ -20,6 +20,7 @@ use model::Vertex;
 mod model;
 mod resources;
 mod texture;
+mod camera;
 
 // #[repr(C)]
 // #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -93,28 +94,29 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
     cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
 );
 
-struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
+// struct Camera {
+//     eye: cgmath::Point3<f32>,
+//     target: cgmath::Point3<f32>,
+//     up: cgmath::Vector3<f32>,
+//     aspect: f32,
+//     fovy: f32,
+//     znear: f32,
+//     zfar: f32,
+// }
 
-impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+// impl Camera {
+//     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+//         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+//         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
 
-        OPENGL_TO_WGPU_MATRIX * proj * view
-    }
-}
+//         OPENGL_TO_WGPU_MATRIX * proj * view
+//     }
+// }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
+    view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
 }
 
@@ -122,88 +124,90 @@ impl CameraUniform {
     fn new() -> Self {
         use cgmath::SquareMatrix;
         Self {
+            view_position: [0.0; 4],
             view_proj: cgmath::Matrix4::identity().into(),
         }
     }
 
-    fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+    fn update_view_proj(&mut self, camera: &camera::Camera, projection: &camera::Projection) {
+        self.view_position = camera.position.to_homogeneous().into();
+        self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into();
     }
 }
 
-struct CameraController {
-    speed: f32,
-    is_forward_pressed: bool,
-    is_backward_pressed: bool,
-    is_left_pressed: bool,
-    is_right_pressed: bool,
-}
+// struct CameraController {
+//     speed: f32,
+//     is_forward_pressed: bool,
+//     is_backward_pressed: bool,
+//     is_left_pressed: bool,
+//     is_right_pressed: bool,
+// }
 
-impl CameraController {
-    fn new(speed: f32) -> Self {
-        Self {
-            speed,
-            is_forward_pressed: false,
-            is_backward_pressed: false,
-            is_left_pressed: false,
-            is_right_pressed: false,
-        }
-    }
+// impl CameraController {
+//     fn new(speed: f32) -> Self {
+//         Self {
+//             speed,
+//             is_forward_pressed: false,
+//             is_backward_pressed: false,
+//             is_left_pressed: false,
+//             is_right_pressed: false,
+//         }
+//     }
 
-    fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
-        match code {
-            KeyCode::KeyW | KeyCode::ArrowUp => {
-                self.is_forward_pressed = is_pressed;
-                true
-            }
-            KeyCode::KeyA | KeyCode::ArrowLeft => {
-                self.is_left_pressed = is_pressed;
-                true
-            }
-            KeyCode::KeyS | KeyCode::ArrowDown => {
-                self.is_backward_pressed = is_pressed;
-                true
-            }
-            KeyCode::KeyD | KeyCode::ArrowRight => {
-                self.is_right_pressed = is_pressed;
-                true
-            }
-            _ => false,
-        }
-    }
+    // fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
+    //     match code {
+    //         KeyCode::KeyW | KeyCode::ArrowUp => {
+    //             self.is_forward_pressed = is_pressed;
+    //             true
+    //         }
+    //         KeyCode::KeyA | KeyCode::ArrowLeft => {
+    //             self.is_left_pressed = is_pressed;
+    //             true
+    //         }
+    //         KeyCode::KeyS | KeyCode::ArrowDown => {
+    //             self.is_backward_pressed = is_pressed;
+    //             true
+    //         }
+    //         KeyCode::KeyD | KeyCode::ArrowRight => {
+    //             self.is_right_pressed = is_pressed;
+    //             true
+    //         }
+    //         _ => false,
+    //     }
+    // }
 
-    fn update_camera(&self, camera: &mut Camera) {
-        use cgmath::InnerSpace;
-        let forward = camera.target - camera.eye;
-        let forward_norm = forward.normalize();
-        let forward_mag = forward.magnitude();
+    // fn update_camera(&self, camera: &mut Camera) {
+    //     use cgmath::InnerSpace;
+    //     let forward = camera.target - camera.eye;
+    //     let forward_norm = forward.normalize();
+    //     let forward_mag = forward.magnitude();
 
-        // Prevents glitching when the camera gets too close to the
-        // center of the scene.
-        if self.is_forward_pressed && forward_mag > self.speed {
-            camera.eye += forward_norm * self.speed;
-        }
-        if self.is_backward_pressed {
-            camera.eye -= forward_norm * self.speed;
-        }
+    //     // Prevents glitching when the camera gets too close to the
+    //     // center of the scene.
+    //     if self.is_forward_pressed && forward_mag > self.speed {
+    //         camera.eye += forward_norm * self.speed;
+    //     }
+    //     if self.is_backward_pressed {
+    //         camera.eye -= forward_norm * self.speed;
+    //     }
 
-        let right = forward_norm.cross(camera.up);
+    //     let right = forward_norm.cross(camera.up);
 
-        // Redo radius calc in case the forward/backward is pressed.
-        let forward = camera.target - camera.eye;
-        let forward_mag = forward.magnitude();
+    //     // Redo radius calc in case the forward/backward is pressed.
+    //     let forward = camera.target - camera.eye;
+    //     let forward_mag = forward.magnitude();
 
-        if self.is_right_pressed {
-            // Rescale the distance between the target and the eye so
-            // that it doesn't change. The eye, therefore, still
-            // lies on the circle made by the target and eye.
-            camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
-        }
-        if self.is_left_pressed {
-            camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
-        }
-    }
-}
+    //     if self.is_right_pressed {
+    //         // Rescale the distance between the target and the eye so
+    //         // that it doesn't change. The eye, therefore, still
+    //         // lies on the circle made by the target and eye.
+    //         camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
+    //     }
+    //     if self.is_left_pressed {
+    //         camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
+    //     }
+    // }
+// }
 
 struct Instance {
     position: cgmath::Vector3<f32>,
@@ -290,12 +294,15 @@ pub struct State {
     diffuse_texture: texture::Texture,
     diffuse_bind_group: wgpu::BindGroup,
 
-    camera: Camera,
+    // camera: Camera,
+    camera: camera::Camera,
+    projection: camera::Projection,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
-    camera_controller: CameraController,
+    // camera_controller: CameraController,
+    camera_controller: camera::CameraController,
 
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
@@ -303,6 +310,8 @@ pub struct State {
     depth_texture: texture::Texture,
 
     obj_model: model::Model,
+
+    mouse_pressed: bool,
 }
 
 impl State {
@@ -423,18 +432,24 @@ impl State {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
-        let camera = Camera {
-            eye: (0.0, 1.0, 2.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: cgmath::Vector3::unit_y(),
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
+        // let camera = Camera {
+        //     eye: (0.0, 1.0, 2.0).into(),
+        //     target: (0.0, 0.0, 0.0).into(),
+        //     up: cgmath::Vector3::unit_y(),
+        //     aspect: config.width as f32 / config.height as f32,
+        //     fovy: 45.0,
+        //     znear: 0.1,
+        //     zfar: 100.0,
+        // };
+
+        let camera = camera::Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let projection = camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
+
+        let camera_controller = camera::CameraController::new(4.0, 0.4);
 
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
+        // camera_uniform.update_view_proj(&camera);
+        camera_uniform.update_view_proj(&camera, &projection);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera_buffer"),
@@ -466,7 +481,7 @@ impl State {
             }],
         });
 
-        let camera_controller = CameraController::new(0.05);
+        // let camera_controller = CameraController::new(0.05);
 
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
@@ -619,6 +634,7 @@ impl State {
             diffuse_texture,
             diffuse_bind_group,
             camera,
+            projection,
             camera_uniform,
             camera_buffer,
             camera_bind_group,
@@ -627,6 +643,7 @@ impl State {
             instance_buffer,
             depth_texture,
             obj_model,
+            mouse_pressed: false,
         })
     }
 
@@ -641,17 +658,30 @@ impl State {
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
 
-            self.camera.aspect = self.config.width as f32 / self.config.height as f32;
+            self.projection.resize(width, height);
+
+            // self.camera.aspect = self.config.width as f32 / self.config.height as f32;
 
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
-    fn update(&mut self) {
+    fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+        match button {
+            MouseButton::Left => self.mouse_pressed = pressed,
+            _ => {}
+        }
+    }
+
+    fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
+        self.camera_controller.handle_mouse_scroll(delta);
+    }
+
+    fn update(&mut self, dt: instant::Duration) {
         // bad, use a staging buffer for the camera ?
-        self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera_controller.update_camera(&mut self.camera, dt);
+        self.camera_uniform.update_view_proj(&self.camera, &self.projection);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -754,14 +784,11 @@ impl State {
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        // match (code, is_pressed) {
-        //     (KeyCode::Escape, true) => event_loop.exit(),
-        //     _ => {}
-        // }
-        if code == KeyCode::Escape && is_pressed {
-            event_loop.exit();
-        } else {
-            self.camera_controller.handle_key(code, is_pressed);
+        if !self.camera_controller.process_keyboard(code, is_pressed) {
+            match (code, is_pressed) {
+                (KeyCode::Escape, true) => event_loop.exit(),
+                _ => {}
+            }
         }
     }
 }
@@ -770,6 +797,7 @@ pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<State>>,
     state: Option<State>,
+    last_time: instant::Instant
 }
 
 impl App {
@@ -777,9 +805,10 @@ impl App {
         #[cfg(target_arch = "wasm32")]
         let proxy = Some(event_loop.create_proxy());
         Self {
-            state: None,
             #[cfg(target_arch = "wasm32")]
             proxy,
+            state: None,
+            last_time: instant::Instant::now(),
         }
     }
 }
@@ -843,6 +872,27 @@ impl ApplicationHandler<State> for App {
         self.state = Some(event);
     }
 
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        let state = if let Some(state) = &mut self.state {
+            state
+        } else {
+            return;
+        };
+        match event {
+            DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                if state.mouse_pressed {
+                    state.camera_controller.handle_mouse(dx, dy);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -858,7 +908,9 @@ impl ApplicationHandler<State> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                state.update();
+                let dt  = self.last_time.elapsed();
+                self.last_time = instant::Instant::now();
+                state.update(dt);
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
@@ -871,11 +923,14 @@ impl ApplicationHandler<State> for App {
                     }
                 }
             }
-            WindowEvent::MouseInput { state, button, .. } => match (button, state.is_pressed()) {
-                (MouseButton::Left, true) => {}
-                (MouseButton::Left, false) => {}
-                _ => {}
-            },
+            WindowEvent::MouseInput {
+                state: btn_state,
+                button,
+                ..
+            } => state.handle_mouse_button(button, btn_state.is_pressed()),
+            WindowEvent::MouseWheel { delta, .. } => {
+                state.handle_mouse_scroll(&delta);
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {

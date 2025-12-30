@@ -19,6 +19,8 @@ pollster = "0.3"
 bytemuck = { version = "1.24", features = [ "derive" ] }
 cgmath = "0.18"
 tobj = { version = "3.2", default-features = false, features = ["async"]}
+noise = "0.9"
+instant = "0.1"
 
 [dependencies.image]
 version = "0.24"
@@ -38,6 +40,7 @@ web-sys = { version = "0.3", features = [
     "Location",
 ]}
 reqwest = { version = "0.11" }
+instant = { version = "0.1", features = [ "wasm-bindgen" ] }
 
 [build-dependencies]
 anyhow = "1.0"
