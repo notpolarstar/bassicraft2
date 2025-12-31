@@ -1,11 +1,13 @@
 use std::{iter, sync::Arc};
 
 use cgmath::prelude::*;
-use wgpu::{util::DeviceExt, wgc::device};
-#[cfg(target_arch = "wasm32")]
-use winit::event_loop;
+use wgpu::util::DeviceExt;
 use winit::{
-    application::ApplicationHandler, event::*, event_loop::{ActiveEventLoop, EventLoop}, keyboard::{KeyCode, PhysicalKey}, window::Window
+    application::ApplicationHandler,
+    event::*,
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::Window,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -682,22 +684,32 @@ impl State {
         match button {
             MouseButton::Left => {
                 self.mouse_pressed = pressed;
-                #[cfg(target_arch = "wasm32")]
-                {
-                    use wasm_bindgen::JsCast;
-                    let window = web_sys::window().unwrap();
-                    let document = window.document().unwrap();
-                    let canvas = document.get_element_by_id("canvas").unwrap();
-                    let html_canvas: web_sys::HtmlCanvasElement = canvas.dyn_into().unwrap();
-                    html_canvas.request_pointer_lock();
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    use winit::window::CursorGrabMode;
-                    self.window
-                        .set_cursor_grab(CursorGrabMode::Confined)
-                        .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked))
-                        .unwrap();
+                if pressed {
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        use wasm_bindgen::JsCast;
+                        let window = web_sys::window().unwrap();
+                        let document = window.document().unwrap();
+                        let canvas = document.get_element_by_id("canvas").unwrap();
+                        let html_canvas: web_sys::HtmlCanvasElement = canvas.dyn_into().unwrap();
+                        html_canvas.request_pointer_lock();
+                        html_canvas.request_fullscreen();
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        use winit::window::CursorGrabMode;
+                        self.window
+                            .set_cursor_grab(CursorGrabMode::Confined)
+                            .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked))
+                            .unwrap();
+
+                        let size = self.window.inner_size();
+                        let center = winit::dpi::PhysicalPosition::new(
+                            size.width as f64 / 2.0,
+                            size.height as f64 / 2.0,
+                        );
+                        let _ = self.window.set_cursor_position(center);
+                    }
                 }
             }
             _ => {}
@@ -856,7 +868,7 @@ impl ApplicationHandler<State> for App {
         #[cfg(target_arch = "wasm32")]
         {
             use wasm_bindgen::JsCast;
-            use winit::{platform::web::WindowAttributesExtWebSys, window};
+            use winit::platform::web::WindowAttributesExtWebSys;
 
             const CANVAS_ID: &str = "canvas";
 
@@ -921,11 +933,10 @@ impl ApplicationHandler<State> for App {
         };
         match event {
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
-                // if state.mouse_pressed {
-                //     state.camera_controller.handle_mouse(dx, dy);
-                // }
-                log::info!("DELTA : {} {}", dx, dy);
-                println!("DELTA : {} {}", dx, dy);
+                if dx.abs() < 0.001 && dy.abs() < 0.001 {
+                    return;
+                }
+
                 state.camera_controller.handle_mouse(dx, dy);
             }
             _ => {}
