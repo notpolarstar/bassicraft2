@@ -5,11 +5,7 @@ use wgpu::{util::DeviceExt, wgc::device};
 #[cfg(target_arch = "wasm32")]
 use winit::event_loop;
 use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
+    application::ApplicationHandler, event::*, event_loop::{ActiveEventLoop, EventLoop}, keyboard::{KeyCode, PhysicalKey}, window::Window
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -17,10 +13,10 @@ use wasm_bindgen::prelude::*;
 
 use model::Vertex;
 
+mod camera;
 mod model;
 mod resources;
 mod texture;
-mod camera;
 
 // #[repr(C)]
 // #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -154,59 +150,59 @@ impl CameraUniform {
 //         }
 //     }
 
-    // fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
-    //     match code {
-    //         KeyCode::KeyW | KeyCode::ArrowUp => {
-    //             self.is_forward_pressed = is_pressed;
-    //             true
-    //         }
-    //         KeyCode::KeyA | KeyCode::ArrowLeft => {
-    //             self.is_left_pressed = is_pressed;
-    //             true
-    //         }
-    //         KeyCode::KeyS | KeyCode::ArrowDown => {
-    //             self.is_backward_pressed = is_pressed;
-    //             true
-    //         }
-    //         KeyCode::KeyD | KeyCode::ArrowRight => {
-    //             self.is_right_pressed = is_pressed;
-    //             true
-    //         }
-    //         _ => false,
-    //     }
-    // }
+// fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
+//     match code {
+//         KeyCode::KeyW | KeyCode::ArrowUp => {
+//             self.is_forward_pressed = is_pressed;
+//             true
+//         }
+//         KeyCode::KeyA | KeyCode::ArrowLeft => {
+//             self.is_left_pressed = is_pressed;
+//             true
+//         }
+//         KeyCode::KeyS | KeyCode::ArrowDown => {
+//             self.is_backward_pressed = is_pressed;
+//             true
+//         }
+//         KeyCode::KeyD | KeyCode::ArrowRight => {
+//             self.is_right_pressed = is_pressed;
+//             true
+//         }
+//         _ => false,
+//     }
+// }
 
-    // fn update_camera(&self, camera: &mut Camera) {
-    //     use cgmath::InnerSpace;
-    //     let forward = camera.target - camera.eye;
-    //     let forward_norm = forward.normalize();
-    //     let forward_mag = forward.magnitude();
+// fn update_camera(&self, camera: &mut Camera) {
+//     use cgmath::InnerSpace;
+//     let forward = camera.target - camera.eye;
+//     let forward_norm = forward.normalize();
+//     let forward_mag = forward.magnitude();
 
-    //     // Prevents glitching when the camera gets too close to the
-    //     // center of the scene.
-    //     if self.is_forward_pressed && forward_mag > self.speed {
-    //         camera.eye += forward_norm * self.speed;
-    //     }
-    //     if self.is_backward_pressed {
-    //         camera.eye -= forward_norm * self.speed;
-    //     }
+//     // Prevents glitching when the camera gets too close to the
+//     // center of the scene.
+//     if self.is_forward_pressed && forward_mag > self.speed {
+//         camera.eye += forward_norm * self.speed;
+//     }
+//     if self.is_backward_pressed {
+//         camera.eye -= forward_norm * self.speed;
+//     }
 
-    //     let right = forward_norm.cross(camera.up);
+//     let right = forward_norm.cross(camera.up);
 
-    //     // Redo radius calc in case the forward/backward is pressed.
-    //     let forward = camera.target - camera.eye;
-    //     let forward_mag = forward.magnitude();
+//     // Redo radius calc in case the forward/backward is pressed.
+//     let forward = camera.target - camera.eye;
+//     let forward_mag = forward.magnitude();
 
-    //     if self.is_right_pressed {
-    //         // Rescale the distance between the target and the eye so
-    //         // that it doesn't change. The eye, therefore, still
-    //         // lies on the circle made by the target and eye.
-    //         camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
-    //     }
-    //     if self.is_left_pressed {
-    //         camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
-    //     }
-    // }
+//     if self.is_right_pressed {
+//         // Rescale the distance between the target and the eye so
+//         // that it doesn't change. The eye, therefore, still
+//         // lies on the circle made by the target and eye.
+//         camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
+//     }
+//     if self.is_left_pressed {
+//         camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
+//     }
+// }
 // }
 
 struct Instance {
@@ -443,7 +439,8 @@ impl State {
         // };
 
         let camera = camera::Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
-        let projection = camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
+        let projection =
+            camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
 
         let camera_controller = camera::CameraController::new(4.0, 0.4);
 
@@ -667,9 +664,42 @@ impl State {
         }
     }
 
+    // fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
+    //     match button {
+    //         MouseButton::Left => {
+    //             self.mouse_pressed = pressed;
+    //             use winit::window::CursorGrabMode;
+    //             self.window
+    //                 .set_cursor_grab(CursorGrabMode::Confined)
+    //                 .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked))
+    //                 .unwrap();
+    //         }
+    //         _ => {}
+    //     }
+    // }
+
     fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
         match button {
-            MouseButton::Left => self.mouse_pressed = pressed,
+            MouseButton::Left => {
+                self.mouse_pressed = pressed;
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use wasm_bindgen::JsCast;
+                    let window = web_sys::window().unwrap();
+                    let document = window.document().unwrap();
+                    let canvas = document.get_element_by_id("canvas").unwrap();
+                    let html_canvas: web_sys::HtmlCanvasElement = canvas.dyn_into().unwrap();
+                    html_canvas.request_pointer_lock();
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    use winit::window::CursorGrabMode;
+                    self.window
+                        .set_cursor_grab(CursorGrabMode::Confined)
+                        .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked))
+                        .unwrap();
+                }
+            }
             _ => {}
         }
     }
@@ -681,7 +711,8 @@ impl State {
     fn update(&mut self, dt: instant::Duration) {
         // bad, use a staging buffer for the camera ?
         self.camera_controller.update_camera(&mut self.camera, dt);
-        self.camera_uniform.update_view_proj(&self.camera, &self.projection);
+        self.camera_uniform
+            .update_view_proj(&self.camera, &self.projection);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -773,8 +804,12 @@ impl State {
             let material = &self.obj_model.materials[mesh.material];
 
             use model::DrawModel;
-            render_pass
-                .draw_mesh_instanced(mesh, material, 0..self.instances.len() as u32, &self.camera_bind_group);
+            render_pass.draw_mesh_instanced(
+                mesh,
+                material,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+            );
         }
 
         self.queue.submit(iter::once(encoder.finish()));
@@ -797,7 +832,7 @@ pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<State>>,
     state: Option<State>,
-    last_time: instant::Instant
+    last_time: instant::Instant,
 }
 
 impl App {
@@ -821,7 +856,7 @@ impl ApplicationHandler<State> for App {
         #[cfg(target_arch = "wasm32")]
         {
             use wasm_bindgen::JsCast;
-            use winit::platform::web::WindowAttributesExtWebSys;
+            use winit::{platform::web::WindowAttributesExtWebSys, window};
 
             const CANVAS_ID: &str = "canvas";
 
@@ -833,6 +868,7 @@ impl ApplicationHandler<State> for App {
         }
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+        window.set_cursor_visible(false);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -885,9 +921,12 @@ impl ApplicationHandler<State> for App {
         };
         match event {
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
-                if state.mouse_pressed {
-                    state.camera_controller.handle_mouse(dx, dy);
-                }
+                // if state.mouse_pressed {
+                //     state.camera_controller.handle_mouse(dx, dy);
+                // }
+                log::info!("DELTA : {} {}", dx, dy);
+                println!("DELTA : {} {}", dx, dy);
+                state.camera_controller.handle_mouse(dx, dy);
             }
             _ => {}
         }
@@ -908,7 +947,7 @@ impl ApplicationHandler<State> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => state.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
-                let dt  = self.last_time.elapsed();
+                let dt = self.last_time.elapsed();
                 self.last_time = instant::Instant::now();
                 state.update(dt);
                 match state.render() {
