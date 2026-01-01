@@ -1,7 +1,7 @@
 use std::{iter, sync::Arc};
 
 use cgmath::prelude::*;
-use wgpu::util::DeviceExt;
+use wgpu::util::{DeviceExt, RenderEncoder};
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -20,69 +20,10 @@ mod model;
 mod resources;
 mod texture;
 
-// #[repr(C)]
-// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-// struct Vertex {
-//     position: [f32; 3],
-//     // color: [f32; 3],
-//     tex_coords: [f32; 2],
-// }
-
-// impl Vertex {
-//     const ATTRIBS: [wgpu::VertexAttribute; 2] =
-//         wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
-//     // 0 is position (incredible)
-//     // 1 is color (cool wow)
-
-//     fn desc() -> wgpu::VertexBufferLayout<'static> {
-//         // wgpu::VertexBufferLayout {
-//         //     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-//         //     step_mode: wgpu::VertexStepMode::Vertex,
-//         //     attributes: &[
-//         //         wgpu::VertexAttribute {
-//         //             offset: 0,
-//         //             shader_location: 0,
-//         //             format: wgpu::VertexFormat::Float32x3,
-//         //         },
-//         //         wgpu::VertexAttribute {
-//         //             offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-//         //             shader_location: 1,
-//         //             format: wgpu::VertexFormat::Float32x3,
-//         //         }
-//         //     ]
-//         // }
-//         wgpu::VertexBufferLayout {
-//             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
-//             step_mode: wgpu::VertexStepMode::Vertex,
-//             attributes: &Self::ATTRIBS,
-//         }
-//     }
-// }
-
-// const VERTICES: &[Vertex] = &[
-//     Vertex {
-//         position: [-0.0868241, 0.49240386, 0.0],
-//         tex_coords: [0.4131759, 0.00759614],
-//     },
-//     Vertex {
-//         position: [-0.49513406, 0.06958647, 0.0],
-//         tex_coords: [0.0048659444, 0.43041354],
-//     },
-//     Vertex {
-//         position: [-0.21918549, -0.44939706, 0.0],
-//         tex_coords: [0.28081453, 0.949397],
-//     },
-//     Vertex {
-//         position: [0.35966998, -0.3473291, 0.0],
-//         tex_coords: [0.85967, 0.84732914],
-//     },
-//     Vertex {
-//         position: [0.44147372, 0.2347359, 0.0],
-//         tex_coords: [0.9414737, 0.2652641],
-//     },
-// ];
-
-// const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+mod world;
+mod texture_atlas;
+mod block;
+mod chunk;
 
 // #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
@@ -91,25 +32,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
     cgmath::Vector4::new(0.0, 0.0, 0.5, 0.0),
     cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
 );
-
-// struct Camera {
-//     eye: cgmath::Point3<f32>,
-//     target: cgmath::Point3<f32>,
-//     up: cgmath::Vector3<f32>,
-//     aspect: f32,
-//     fovy: f32,
-//     znear: f32,
-//     zfar: f32,
-// }
-
-// impl Camera {
-//     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-//         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-//         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
-
-//         OPENGL_TO_WGPU_MATRIX * proj * view
-//     }
-// }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -132,80 +54,6 @@ impl CameraUniform {
         self.view_proj = (projection.calc_matrix() * camera.calc_matrix()).into();
     }
 }
-
-// struct CameraController {
-//     speed: f32,
-//     is_forward_pressed: bool,
-//     is_backward_pressed: bool,
-//     is_left_pressed: bool,
-//     is_right_pressed: bool,
-// }
-
-// impl CameraController {
-//     fn new(speed: f32) -> Self {
-//         Self {
-//             speed,
-//             is_forward_pressed: false,
-//             is_backward_pressed: false,
-//             is_left_pressed: false,
-//             is_right_pressed: false,
-//         }
-//     }
-
-// fn handle_key(&mut self, code: KeyCode, is_pressed: bool) -> bool {
-//     match code {
-//         KeyCode::KeyW | KeyCode::ArrowUp => {
-//             self.is_forward_pressed = is_pressed;
-//             true
-//         }
-//         KeyCode::KeyA | KeyCode::ArrowLeft => {
-//             self.is_left_pressed = is_pressed;
-//             true
-//         }
-//         KeyCode::KeyS | KeyCode::ArrowDown => {
-//             self.is_backward_pressed = is_pressed;
-//             true
-//         }
-//         KeyCode::KeyD | KeyCode::ArrowRight => {
-//             self.is_right_pressed = is_pressed;
-//             true
-//         }
-//         _ => false,
-//     }
-// }
-
-// fn update_camera(&self, camera: &mut Camera) {
-//     use cgmath::InnerSpace;
-//     let forward = camera.target - camera.eye;
-//     let forward_norm = forward.normalize();
-//     let forward_mag = forward.magnitude();
-
-//     // Prevents glitching when the camera gets too close to the
-//     // center of the scene.
-//     if self.is_forward_pressed && forward_mag > self.speed {
-//         camera.eye += forward_norm * self.speed;
-//     }
-//     if self.is_backward_pressed {
-//         camera.eye -= forward_norm * self.speed;
-//     }
-
-//     let right = forward_norm.cross(camera.up);
-
-//     // Redo radius calc in case the forward/backward is pressed.
-//     let forward = camera.target - camera.eye;
-//     let forward_mag = forward.magnitude();
-
-//     if self.is_right_pressed {
-//         // Rescale the distance between the target and the eye so
-//         // that it doesn't change. The eye, therefore, still
-//         // lies on the circle made by the target and eye.
-//         camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
-//     }
-//     if self.is_left_pressed {
-//         camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
-//     }
-// }
-// }
 
 struct Instance {
     position: cgmath::Vector3<f32>,
@@ -267,14 +115,14 @@ impl InstanceRaw {
     }
 }
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-);
+// const NUM_INSTANCES_PER_ROW: u32 = 10;
+// const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+//     NUM_INSTANCES_PER_ROW as f32 * 0.5,
+//     0.0,
+//     NUM_INSTANCES_PER_ROW as f32 * 0.5,
+// );
 
-const ROTATION_SPEED: f32 = (2.0 * std::f32::consts::PI / 60.0) / 100.0;
+// const ROTATION_SPEED: f32 = (2.0 * std::f32::consts::PI / 60.0) / 100.0;
 
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -302,12 +150,14 @@ pub struct State {
     // camera_controller: CameraController,
     camera_controller: camera::CameraController,
 
-    instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
+    // instances: Vec<Instance>,
+    // instance_buffer: wgpu::Buffer,
 
     depth_texture: texture::Texture,
 
-    obj_model: model::Model,
+    // obj_model: model::Model,
+
+    world: world::World,
 
     mouse_pressed: bool,
 }
@@ -499,7 +349,8 @@ impl State {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 // buffers: &[Vertex::desc(), InstanceRaw::desc()],
-                buffers: &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                // buffers: &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                buffers: &[block::BlockVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -541,28 +392,14 @@ impl State {
             cache: None,
         });
 
-        // let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("This Vexes Me"),
-        //     contents: bytemuck::cast_slice(VERTICES),
-        //     usage: wgpu::BufferUsages::VERTEX,
-        // });
-
-        // let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("I too am in this pipeline."),
-        //     contents: bytemuck::cast_slice(INDICES),
-        //     usage: wgpu::BufferUsages::INDEX,
-        // });
-
-        // let num_vertices = INDICES.len() as u32;
-
+        // const SPACE_BETWEEN: f32 = 3.0;
         // let instances = (0..NUM_INSTANCES_PER_ROW)
         //     .flat_map(|z| {
         //         (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-        //             let position = cgmath::Vector3 {
-        //                 x: x as f32,
-        //                 y: 0.0,
-        //                 z: z as f32,
-        //             } - INSTANCE_DISPLACEMENT;
+        //             let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+        //             let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+        //             let position = cgmath::Vector3 { x: x, y: 0.0, z: z };
 
         //             let rotation = if position.is_zero() {
         //                 cgmath::Quaternion::from_axis_angle(
@@ -581,43 +418,19 @@ impl State {
         //     })
         //     .collect::<Vec<_>>();
 
-        const SPACE_BETWEEN: f32 = 3.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+        // let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        // let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: Some("Instance Buffer"),
+        //     contents: bytemuck::cast_slice(&instance_data),
+        //     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        // });
 
-                    let position = cgmath::Vector3 { x: x, y: 0.0, z: z };
+        // let obj_model =
+        //     resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+        //         .await
+        //         .unwrap();
 
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
-
-                    Instance {
-                        position: position,
-                        rotation: rotation,
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let obj_model =
-            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
+        let world = world::World::new(&device, &queue, 0x1f6c2);
 
         Ok(Self {
             surface,
@@ -638,10 +451,11 @@ impl State {
             camera_buffer,
             camera_bind_group,
             camera_controller,
-            instances,
-            instance_buffer,
+            // instances,
+            // instance_buffer,
             depth_texture,
-            obj_model,
+            // obj_model,
+            world: world,
             mouse_pressed: false,
         })
     }
@@ -659,26 +473,10 @@ impl State {
 
             self.projection.resize(width, height);
 
-            // self.camera.aspect = self.config.width as f32 / self.config.height as f32;
-
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
-
-    // fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
-    //     match button {
-    //         MouseButton::Left => {
-    //             self.mouse_pressed = pressed;
-    //             use winit::window::CursorGrabMode;
-    //             self.window
-    //                 .set_cursor_grab(CursorGrabMode::Confined)
-    //                 .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked))
-    //                 .unwrap();
-    //         }
-    //         _ => {}
-    //     }
-    // }
 
     fn handle_mouse_button(&mut self, button: MouseButton, pressed: bool) {
         match button {
@@ -731,21 +529,21 @@ impl State {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        for instance in &mut self.instances {
-            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
-            let current = instance.rotation;
-            instance.rotation = amount * current;
-        }
-        let instance_data = self
-            .instances
-            .iter()
-            .map(Instance::to_raw)
-            .collect::<Vec<_>>();
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&instance_data),
-        );
+        // for instance in &mut self.instances {
+        //     let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
+        //     let current = instance.rotation;
+        //     instance.rotation = amount * current;
+        // }
+        // let instance_data = self
+        //     .instances
+        //     .iter()
+        //     .map(Instance::to_raw)
+        //     .collect::<Vec<_>>();
+        // self.queue.write_buffer(
+        //     &self.instance_buffer,
+        //     0,
+        //     bytemuck::cast_slice(&instance_data),
+        // );
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -796,32 +594,24 @@ impl State {
                 timestamp_writes: None,
             });
 
-            // render_pass.set_pipeline(&self.render_pipeline);
-            // render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            // render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            // render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            // render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            // render_pass.draw_indexed(0..self.num_vertices, 0, 0..self.instances.len() as _);
-
-            // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            // render_pass.set_pipeline(&self.render_pipeline);
-            // render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            // render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.world.texture_atlas.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.world.chunk_buffers[0].vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.world.chunk_buffers[0].indices_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..self.world.chunk_buffers[0].num_elements, 0, 0..1);
 
-            let mesh = &self.obj_model.meshes[0];
-            let material = &self.obj_model.materials[mesh.material];
+            // let mesh = &self.obj_model.meshes[0];
+            // let material = &self.obj_model.materials[mesh.material];
 
-            use model::DrawModel;
-            render_pass.draw_mesh_instanced(
-                mesh,
-                material,
-                0..self.instances.len() as u32,
-                &self.camera_bind_group,
-            );
+            // use model::DrawModel;
+            // render_pass.draw_mesh_instanced(
+            //     mesh,
+            //     material,
+            //     0..self.instances.len() as u32,
+            //     &self.camera_bind_group,
+            // );
         }
 
         self.queue.submit(iter::once(encoder.finish()));
