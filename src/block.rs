@@ -118,6 +118,13 @@ pub struct Block {
 
 impl Block {
     pub fn new(mat: BlockType, close_blocks: [bool; 6]) -> Self {
+        if mat == 0 {
+            return Self {
+                mat: mat,
+                faces: [None; 6],
+            }
+        }
+
         use FaceDirections::*;
         let directions = [BACK, FRONT, LEFT, RIGHT, TOP, BOTTOM];
 

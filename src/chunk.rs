@@ -1,5 +1,7 @@
 use std::{default, vec};
 
+use noise::{OpenSimplex};
+
 use crate::block::{Block, BlockVertex, Face};
 
 const CHUNK_X_SIZE: usize = 16;
@@ -61,8 +63,8 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(pos: [i32; 2]) -> Self {
-        let blocks = vec![vec![vec![Block::new(0, [false; 6]); CHUNK_Z_SIZE]; CHUNK_Y_SIZE]; CHUNK_X_SIZE];
+    pub fn new(pos: [i32; 2], ) -> Self {
+        let blocks = vec![vec![vec![Block::new(17, [false; 6]); CHUNK_Z_SIZE]; CHUNK_Y_SIZE]; CHUNK_X_SIZE];
 
         let mesh = Mesh::new(&blocks);
 

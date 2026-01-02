@@ -290,7 +290,7 @@ impl State {
         //     zfar: 100.0,
         // };
 
-        let camera = camera::Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let camera = camera::Camera::new((0.0, 250.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
         let projection =
             camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
 
@@ -598,9 +598,16 @@ impl State {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.world.texture_atlas.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.world.chunk_buffers[0].vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.world.chunk_buffers[0].indices_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..self.world.chunk_buffers[0].num_elements, 0, 0..1);
+
+            self.world.chunk_buffers.iter().for_each(|cb| {
+                render_pass.set_vertex_buffer(0, cb.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(cb.indices_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..cb.num_elements, 0, 0..1);
+            });
+
+            // render_pass.set_vertex_buffer(0, self.world.chunk_buffers[0].vertex_buffer.slice(..));
+            // render_pass.set_index_buffer(self.world.chunk_buffers[0].indices_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            // render_pass.draw_indexed(0..self.world.chunk_buffers[0].num_elements, 0, 0..1);
 
             // let mesh = &self.obj_model.meshes[0];
             // let material = &self.obj_model.materials[mesh.material];
@@ -653,7 +660,7 @@ impl App {
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
-        let mut window_attributes = Window::default_attributes();
+        let mut window_attributes = Window::default_attributes().with_maximized(true);
 
         #[cfg(target_arch = "wasm32")]
         {

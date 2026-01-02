@@ -74,8 +74,17 @@ impl TextureAtlas {
     }
 
     pub fn get_block_texture_from_type(mat: u32) -> [[f32; 2]; 4] {
-        let x = (mat % TEXTURE_ATLAS_X_SIZE as u32) as f32;
-        let y = (mat / TEXTURE_ATLAS_X_SIZE as u32) as f32;
+        if mat == 0 {
+            return [
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [0.0, 0.0],
+            ]
+        }
+
+        let x = ((mat - 1) % TEXTURE_ATLAS_X_SIZE as u32) as f32;
+        let y = ((mat - 1) / TEXTURE_ATLAS_X_SIZE as u32) as f32;
 
         let tex_size = BLOCK_TEXTURE_SIZE_TOTAL;
 
