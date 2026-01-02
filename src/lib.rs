@@ -290,7 +290,7 @@ impl State {
         //     zfar: 100.0,
         // };
 
-        let camera = camera::Camera::new((0.0, 250.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let camera = camera::Camera::new((0.0, 100.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
         let projection =
             camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
 
@@ -599,7 +599,7 @@ impl State {
             render_pass.set_bind_group(0, &self.world.texture_atlas.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
-            self.world.chunk_buffers.iter().for_each(|cb| {
+            self.world.chunk_buffers.iter().filter(|cb| cb.vertex_buffer.size() > 0 && cb.indices_buffer.size() > 0).for_each(|cb| {
                 render_pass.set_vertex_buffer(0, cb.vertex_buffer.slice(..));
                 render_pass.set_index_buffer(cb.indices_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..cb.num_elements, 0, 0..1);

@@ -45,12 +45,26 @@ pub struct World {
 
 impl World {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, seed: u32) -> Self {
-        // TEMP TEMP TEMP TODO ACTUAL WORLD GEN
-        let base_chunk = Chunk::new([0, 0]);
-        let mesh = base_chunk.mesh.clone();
+        let noise_gen = OpenSimplex::new(seed);
 
-        let chunks = vec![base_chunk];
-        let chunk_buffers = vec![ChunkBuffer::new(device, mesh.vertices, mesh.indices, mesh.num_elements)];
+        // TEMP TEMP TEMP TODO ACTUAL WORLD GEN
+        let mut chunks = Vec::new();
+        let mut chunk_buffers = Vec::new();
+
+        for x in -1..1 {
+            for y in -1..1 {
+                let base_chunk = Chunk::new([x, y], noise_gen);
+                let mesh = base_chunk.mesh.clone();
+
+                let chunk_buffer = ChunkBuffer::new(device, mesh.vertices, mesh.indices, mesh.num_elements);
+
+                chunks.push(base_chunk);
+                chunk_buffers.push(chunk_buffer);
+            }
+        }
+
+        // chunks = vec![base_chunk];
+        // let chunk_buffers = vec![ChunkBuffer::new(device, mesh.vertices, mesh.indices, mesh.num_elements)];
 
         // println!("CHUNKBUFFER : {:?}", chunk_buffers);
 
@@ -58,7 +72,7 @@ impl World {
             chunks: chunks,
             chunk_buffers: chunk_buffers,
 
-            noise_gen: OpenSimplex::new(seed),
+            noise_gen: noise_gen,
 
             texture_atlas: TextureAtlas::new(device, queue),
         }

@@ -1,6 +1,6 @@
 use std::{default, vec};
 
-use noise::{OpenSimplex};
+use noise::{NoiseFn, OpenSimplex};
 
 use crate::block::{Block, BlockVertex, Face};
 
@@ -16,7 +16,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn new(blocks: &Vec<Vec<Vec<Block>>>) -> Self {
+    pub fn new(pos: [i32; 2], blocks: &Vec<Vec<Vec<Block>>>) -> Self {
         let mut vertices: Vec<BlockVertex> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
         let mut num_elements: u32 = 0;
@@ -31,10 +31,12 @@ impl Mesh {
                         .for_each(|f| {
                             vertices.extend(
                                 f.verts.iter().map(|v| {
+                                    // THIS IS BAD ! Later : send the pos of the chunk in the shader and move them there
+
                                     let mut v = v.clone();
-                                    v.position[0] += x as f32;
+                                    v.position[0] += x as f32 + CHUNK_X_SIZE as f32 * pos[0] as f32;
                                     v.position[1] += y as f32;
-                                    v.position[2] += z as f32;
+                                    v.position[2] += z as f32 + CHUNK_Z_SIZE as f32 * pos[1] as f32;
                                     v
                                 })
                             );
@@ -63,15 +65,46 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(pos: [i32; 2], ) -> Self {
-        let blocks = vec![vec![vec![Block::new(17, [false; 6]); CHUNK_Z_SIZE]; CHUNK_Y_SIZE]; CHUNK_X_SIZE];
+    pub fn new(pos: [i32; 2], noise_fn: OpenSimplex) -> Self {
+        let blocks = Chunk::generate_blocks(pos, noise_fn);
 
-        let mesh = Mesh::new(&blocks);
+        let mesh = Mesh::new(pos, &blocks);
 
         Self {
             pos,
             blocks: blocks,
             mesh: mesh,
         }
+    }
+
+    fn generate_blocks(pos: [i32; 2], noise_fn: OpenSimplex) -> Vec<Vec<Vec<Block>>> {
+        let mut blocks = vec![vec![vec![Block::new(0, [false; 6]); CHUNK_Z_SIZE]; CHUNK_Y_SIZE]; CHUNK_X_SIZE];
+
+        for x in 0..CHUNK_X_SIZE {
+            for z in 0..CHUNK_Z_SIZE {
+                let noise_val = noise_fn.get([
+                    (x as i32 + pos[0] * CHUNK_X_SIZE as i32) as f64 / 20.0,
+                    (z as i32 + pos[1] * CHUNK_Z_SIZE as i32) as f64 / 20.0,
+                ]);
+                let ground_height = (noise_val * 10.0 + 80.0) as usize;
+                const STONE_HEIGHT: usize = 60;
+
+                for y in 0..CHUNK_Y_SIZE {
+                    let block_type = if y < ground_height.saturating_sub(1) && y <= STONE_HEIGHT {
+                        2
+                    } else if y < ground_height.saturating_sub(1) && y > STONE_HEIGHT {
+                        3
+                    } else if y == ground_height.saturating_sub(1) && ground_height > 0 {
+                        1
+                    } else {
+                        0
+                    };
+                    // println!("BLOCK : {}", block_type);
+                    blocks[x][y][z] = Block::new(block_type, [false; 6]);
+                }
+            }
+        }
+
+        blocks
     }
 }
