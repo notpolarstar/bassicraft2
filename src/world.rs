@@ -93,4 +93,19 @@ impl World {
             );
         }
     }
+
+    pub fn place_block(&mut self, device: &wgpu::Device, pos: [i32; 3]) {
+        if let Some((chunk_index, chunk)) = self.chunks.iter_mut().enumerate().find(|(_, c)| c.contains_position(pos)) {
+            chunk.place_block(pos);
+
+            let mesh = chunk.mesh.clone();
+
+            self.chunk_buffers[chunk_index] = ChunkBuffer::new(
+                device,
+                mesh.vertices,
+                mesh.indices,
+                mesh.num_elements,
+            );
+        }
+    }
 }

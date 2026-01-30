@@ -246,6 +246,28 @@ impl Chunk {
         self.mesh = Mesh::new(self.pos, &self.blocks);
     }
 
+    pub fn place_block(&mut self, pos: [i32; 3]) {
+        let local_x = pos[0] - self.pos[0] * CHUNK_X_SIZE as i32;
+        let local_y = pos[1];
+        let local_z = pos[2] - self.pos[1] * CHUNK_Z_SIZE as i32;
+        
+        if local_x < 0 || local_y < 0 || local_z < 0 {
+            return;
+        }
+        let x = local_x as usize;
+        let y = local_y as usize;
+        let z = local_z as usize;
+        if x >= CHUNK_X_SIZE || y >= CHUNK_Y_SIZE || z >= CHUNK_Z_SIZE {
+            return;
+        }
+        if self.blocks[x][y][z].mat != 0 {
+            return;
+        }
+        self.blocks[x][y][z] = Block::new(8, [false; 6]);
+        self.update_block_faces();
+        self.mesh = Mesh::new(self.pos, &self.blocks);
+    }
+
     pub fn contains_block(&self, pos: [i32; 3]) -> bool {
         let chunk_world_x_min = self.pos[0] * CHUNK_X_SIZE as i32;
         let chunk_world_x_max = chunk_world_x_min + CHUNK_X_SIZE as i32;
@@ -267,5 +289,16 @@ impl Chunk {
         let local_z = (pos[2] - chunk_world_z_min) as usize;
         
         self.blocks[local_x][local_y][local_z].mat != 0
+    }
+
+    pub fn contains_position(&self, pos: [i32; 3]) -> bool {
+        let chunk_world_x_min = self.pos[0] * CHUNK_X_SIZE as i32;
+        let chunk_world_x_max = chunk_world_x_min + CHUNK_X_SIZE as i32;
+        let chunk_world_z_min = self.pos[1] * CHUNK_Z_SIZE as i32;
+        let chunk_world_z_max = chunk_world_z_min + CHUNK_Z_SIZE as i32;
+        
+        pos[0] >= chunk_world_x_min && pos[0] < chunk_world_x_max
+            && pos[1] >= 0 && pos[1] < CHUNK_Y_SIZE as i32
+            && pos[2] >= chunk_world_z_min && pos[2] < chunk_world_z_max
     }
 }
