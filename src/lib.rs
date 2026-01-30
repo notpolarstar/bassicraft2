@@ -292,7 +292,7 @@ impl State {
 
         let camera = camera::Camera::new((0.0, 100.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
         let projection =
-            camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
+            camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 1000.0);
 
         let camera_controller = camera::CameraController::new(4.0, 0.4);
 

@@ -78,7 +78,7 @@ impl Chunk {
     }
 
     fn generate_blocks(pos: [i32; 2], noise_fn: OpenSimplex) -> Vec<Vec<Vec<Block>>> {
-        let mut blocks = vec![vec![vec![Block::new(0, [false; 6]); CHUNK_Z_SIZE]; CHUNK_Y_SIZE]; CHUNK_X_SIZE];
+        let mut block_types = vec![vec![vec![0u32; CHUNK_Z_SIZE]; CHUNK_Y_SIZE]; CHUNK_X_SIZE];
 
         for x in 0..CHUNK_X_SIZE {
             for z in 0..CHUNK_Z_SIZE {
@@ -88,7 +88,6 @@ impl Chunk {
                 ]);
                 let ground_height = (noise_val * 10.0 + 80.0) as usize;
                 const STONE_HEIGHT: usize = 60;
-
                 for y in 0..CHUNK_Y_SIZE {
                     let block_type = if y < ground_height.saturating_sub(1) && y <= STONE_HEIGHT {
                         2
@@ -99,12 +98,61 @@ impl Chunk {
                     } else {
                         0
                     };
-                    // println!("BLOCK : {}", block_type);
-                    blocks[x][y][z] = Block::new(block_type, [false; 6]);
+                    block_types[x][y][z] = block_type;
                 }
             }
         }
 
+        let mut blocks = vec![vec![vec![Block::new(0, [false; 6]); CHUNK_Z_SIZE]; CHUNK_Y_SIZE]; CHUNK_X_SIZE];
+        for x in 0..CHUNK_X_SIZE {
+            for y in 0..CHUNK_Y_SIZE {
+                for z in 0..CHUNK_Z_SIZE {
+                    let block_type = block_types[x][y][z];
+                    if block_type == 0 {
+                        blocks[x][y][z] = Block::new(0, [false; 6]);
+                        continue;
+                    }
+                    let mut close_blocks = [false; 6];
+                    // BACK (-z)
+                    close_blocks[0] = if z == 0 {
+                        false
+                    } else {
+                        block_types[x][y][z-1] != 0
+                    };
+                    // FRONT (+z)
+                    close_blocks[1] = if z == CHUNK_Z_SIZE-1 {
+                        false
+                    } else {
+                        block_types[x][y][z+1] != 0
+                    };
+                    // LEFT (-x)
+                    close_blocks[2] = if x == 0 {
+                        false
+                    } else {
+                        block_types[x-1][y][z] != 0
+                    };
+                    // RIGHT (+x)
+                    close_blocks[3] = if x == CHUNK_X_SIZE-1 {
+                        false
+                    } else {
+                        block_types[x+1][y][z] != 0
+                    };
+                    // TOP (+y)
+                    close_blocks[4] = if y == CHUNK_Y_SIZE-1 {
+                        false
+                    } else {
+                        block_types[x][y+1][z] != 0
+                    };
+                    // BOTTOM (-y)
+                    close_blocks[5] = if y == 0 {
+                        false
+                    } else {
+                        block_types[x][y-1][z] != 0
+                    };
+                    blocks[x][y][z] = Block::new(block_type, close_blocks);
+                }
+            }
+        }
         blocks
     }
 }

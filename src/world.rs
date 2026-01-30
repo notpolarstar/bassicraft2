@@ -47,12 +47,13 @@ impl World {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, seed: u32) -> Self {
         let noise_gen = OpenSimplex::new(seed);
 
-        // TEMP TEMP TEMP TODO ACTUAL WORLD GEN
         let mut chunks = Vec::new();
         let mut chunk_buffers = Vec::new();
 
-        for x in -1..1 {
-            for y in -1..1 {
+        const WORLD_SIZE: i32 = 5;
+
+        for x in -WORLD_SIZE..WORLD_SIZE {
+            for y in -WORLD_SIZE..WORLD_SIZE {
                 let base_chunk = Chunk::new([x, y], noise_gen);
                 let mesh = base_chunk.mesh.clone();
 
