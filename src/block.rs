@@ -141,4 +141,8 @@ impl Block {
             faces: faces,
         }
     }
+
+    pub fn is_air(&self) -> bool {
+        self.mat == 0
+    }
 }

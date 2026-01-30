@@ -516,6 +516,11 @@ impl State {
                         );
                         let _ = self.window.set_cursor_position(center);
                     }
+
+                    if let Some(pos) = self.player.get_block_pointed_at(&self.world.chunks) {
+                        self.world.break_block(&self.device, pos);
+                    }
+
                 }
             }
             _ => {}

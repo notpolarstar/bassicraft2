@@ -64,6 +64,12 @@ pub struct Chunk {
     pub mesh: Mesh,
 }
 
+impl PartialEq for Chunk {
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos
+    }
+}
+
 impl Chunk {
     pub fn new(pos: [i32; 2], noise_fn: OpenSimplex) -> Self {
         let blocks = Chunk::generate_blocks(pos, noise_fn);
@@ -154,5 +160,112 @@ impl Chunk {
             }
         }
         blocks
+    }
+
+    fn update_block_faces(&mut self) {
+        for x in 0..CHUNK_X_SIZE {
+            for y in 0..CHUNK_Y_SIZE {
+                for z in 0..CHUNK_Z_SIZE {
+                    let block_type = self.blocks[x][y][z].mat;
+                    if block_type == 0 {
+                        self.blocks[x][y][z] = Block::new(0, [false; 6]);
+                        continue;
+                    }
+                    let mut close_blocks = [false; 6];
+                    // BACK (-z)
+                    close_blocks[0] = if z == 0 {
+                        false
+                    } else {
+                        self.blocks[x][y][z-1].mat != 0
+                    };
+                    // FRONT (+z)
+                    close_blocks[1] = if z == CHUNK_Z_SIZE-1 {
+                        false
+                    } else {
+                        self.blocks[x][y][z+1].mat != 0
+                    };
+                    // LEFT (-x)
+                    close_blocks[2] = if x == 0 {
+                        false
+                    } else {
+                        self.blocks[x-1][y][z].mat != 0
+                    };
+                    // RIGHT (+x)
+                    close_blocks[3] = if x == CHUNK_X_SIZE-1 {
+                        false
+                    } else {
+                        self.blocks[x+1][y][z].mat != 0
+                    };
+                    // TOP (+y)
+                    close_blocks[4] = if y == CHUNK_Y_SIZE-1 {
+                        false
+                    } else {
+                        self.blocks[x][y+1][z].mat != 0
+                    };
+                    // BOTTOM (-y)
+                    close_blocks[5] = if y == 0 {
+                        false
+                    } else {
+                        self.blocks[x][y-1][z].mat != 0
+                    };
+                    self.blocks[x][y][z] = Block::new(block_type, close_blocks);
+                }
+            }
+        }
+    }
+
+    pub fn get_block(&self, pos: [i32; 3]) -> Option<Block> {
+        if pos[0] < 0 || pos[1] < 0 || pos[2] < 0 {
+            return None;
+        }
+        let x = pos[0] as usize;
+        let y = pos[1] as usize;
+        let z = pos[2] as usize;
+        if x >= CHUNK_X_SIZE || y >= CHUNK_Y_SIZE || z >= CHUNK_Z_SIZE {
+            return None;
+        }
+        Some(self.blocks[x][y][z].clone())
+    }
+
+    pub fn break_block(&mut self, pos: [i32; 3]) {
+        let local_x = pos[0] - self.pos[0] * CHUNK_X_SIZE as i32;
+        let local_y = pos[1];
+        let local_z = pos[2] - self.pos[1] * CHUNK_Z_SIZE as i32;
+        
+        if local_x < 0 || local_y < 0 || local_z < 0 {
+            return;
+        }
+        let x = local_x as usize;
+        let y = local_y as usize;
+        let z = local_z as usize;
+        if x >= CHUNK_X_SIZE || y >= CHUNK_Y_SIZE || z >= CHUNK_Z_SIZE {
+            return;
+        }
+        self.blocks[x][y][z] = Block::new(0, [false; 6]);
+        self.update_block_faces();
+        self.mesh = Mesh::new(self.pos, &self.blocks);
+    }
+
+    pub fn contains_block(&self, pos: [i32; 3]) -> bool {
+        let chunk_world_x_min = self.pos[0] * CHUNK_X_SIZE as i32;
+        let chunk_world_x_max = chunk_world_x_min + CHUNK_X_SIZE as i32;
+        let chunk_world_z_min = self.pos[1] * CHUNK_Z_SIZE as i32;
+        let chunk_world_z_max = chunk_world_z_min + CHUNK_Z_SIZE as i32;
+        
+        if pos[0] < chunk_world_x_min || pos[0] >= chunk_world_x_max {
+            return false;
+        }
+        if pos[1] < 0 || pos[1] >= CHUNK_Y_SIZE as i32 {
+            return false;
+        }
+        if pos[2] < chunk_world_z_min || pos[2] >= chunk_world_z_max {
+            return false;
+        }
+
+        let local_x = (pos[0] - chunk_world_x_min) as usize;
+        let local_y = pos[1] as usize;
+        let local_z = (pos[2] - chunk_world_z_min) as usize;
+        
+        self.blocks[local_x][local_y][local_z].mat != 0
     }
 }

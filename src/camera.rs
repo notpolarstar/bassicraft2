@@ -43,6 +43,12 @@ impl Camera {
             Vector3::unit_y(),
         )
     }
+
+    pub fn direction(&self) -> Vector3<f32> {
+        let (sin_pitch, cos_pitch) = self.pitch.0.sin_cos();
+        let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
+        Vector3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize()
+    }
 }
 
 pub struct Projection {
