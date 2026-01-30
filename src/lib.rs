@@ -524,6 +524,7 @@ impl State {
                 }
             }
             MouseButton::Right => {
+                self.mouse_pressed = pressed;
                 if pressed {
                     if let Some(pos) = self.player.get_block_placement_pos(&self.world.chunks) {
                         self.world.place_block(&self.device, pos);
