@@ -16,6 +16,7 @@ use wasm_bindgen::prelude::*;
 use model::Vertex;
 
 mod camera;
+mod player;
 mod model;
 mod resources;
 mod texture;
@@ -141,14 +142,17 @@ pub struct State {
     diffuse_bind_group: wgpu::BindGroup,
 
     // camera: Camera,
-    camera: camera::Camera,
-    projection: camera::Projection,
+    // camera: camera::Camera,
+    // projection: camera::Projection,
+
+    player: player::Player,
+
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
     // camera_controller: CameraController,
-    camera_controller: camera::CameraController,
+    // camera_controller: camera::CameraController,
 
     // instances: Vec<Instance>,
     // instance_buffer: wgpu::Buffer,
@@ -290,15 +294,18 @@ impl State {
         //     zfar: 100.0,
         // };
 
-        let camera = camera::Camera::new((0.0, 100.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
-        let projection =
-            camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 1000.0);
+        // let camera = camera::Camera::new((0.0, 100.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        // let projection =
+        //     camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 1000.0);
 
-        let camera_controller = camera::CameraController::new(4.0, 0.4);
+        // let camera_controller = camera::CameraController::new(4.0, 0.4);
+
+        let player = player::Player::new([0.0, 100.0, 10.0], &config);
 
         let mut camera_uniform = CameraUniform::new();
         // camera_uniform.update_view_proj(&camera);
-        camera_uniform.update_view_proj(&camera, &projection);
+        // camera_uniform.update_view_proj(&camera, &projection);
+        camera_uniform.update_view_proj(&player.camera, &player.projection);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera_buffer"),
@@ -445,12 +452,13 @@ impl State {
             // num_vertices,
             diffuse_texture,
             diffuse_bind_group,
-            camera,
-            projection,
+            player,
+            // camera,
+            // projection,
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            camera_controller,
+            // camera_controller,
             // instances,
             // instance_buffer,
             depth_texture,
@@ -471,7 +479,7 @@ impl State {
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
 
-            self.projection.resize(width, height);
+            self.player.projection.resize(width, height);
 
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
@@ -515,14 +523,14 @@ impl State {
     }
 
     fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
-        self.camera_controller.handle_mouse_scroll(delta);
+        self.player.camera_controller.handle_mouse_scroll(delta);
     }
 
     fn update(&mut self, dt: instant::Duration) {
         // bad, use a staging buffer for the camera ?
-        self.camera_controller.update_camera(&mut self.camera, dt);
+        self.player.camera_controller.update_camera(&mut self.player.camera, dt);
         self.camera_uniform
-            .update_view_proj(&self.camera, &self.projection);
+            .update_view_proj(&self.player.camera, &self.player.projection);
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -628,7 +636,7 @@ impl State {
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        if !self.camera_controller.process_keyboard(code, is_pressed) {
+        if !self.player.camera_controller.process_keyboard(code, is_pressed) {
             match (code, is_pressed) {
                 (KeyCode::Escape, true) => event_loop.exit(),
                 _ => {}
@@ -734,7 +742,7 @@ impl ApplicationHandler<State> for App {
                     return;
                 }
 
-                state.camera_controller.handle_mouse(dx, dy);
+                state.player.camera_controller.handle_mouse(dx, dy);
             }
             _ => {}
         }
