@@ -1,7 +1,6 @@
 use std::{iter, sync::Arc};
 
-use cgmath::prelude::*;
-use wgpu::util::{DeviceExt, RenderEncoder};
+use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -25,6 +24,8 @@ mod world;
 mod texture_atlas;
 mod block;
 mod chunk;
+
+mod gui;
 
 // #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
@@ -126,6 +127,8 @@ impl InstanceRaw {
 // const ROTATION_SPEED: f32 = (2.0 * std::f32::consts::PI / 60.0) / 100.0;
 
 pub struct State {
+    egui_renderer: gui::EguiRenderer,
+    
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -164,6 +167,7 @@ pub struct State {
     world: world::World,
 
     mouse_pressed: bool,
+    cursor_locked: bool,
 }
 
 impl State {
@@ -439,7 +443,16 @@ impl State {
 
         let world = world::World::new(&device, &queue, 0x1f6c2);
 
+        let egui_renderer = gui::EguiRenderer::new(
+            &device,
+            config.format,
+            None,
+            1,
+            &window,
+        );
+
         Ok(Self {
+            egui_renderer,
             surface,
             device,
             queue,
@@ -465,6 +478,7 @@ impl State {
             // obj_model,
             world: world,
             mouse_pressed: false,
+            cursor_locked: false,
         })
     }
 
@@ -515,6 +529,7 @@ impl State {
                             size.height as f64 / 2.0,
                         );
                         let _ = self.window.set_cursor_position(center);
+                        self.lock_cursor();
                     }
 
                     if let Some(pos) = self.player.get_block_pointed_at(&self.world.chunks) {
@@ -526,6 +541,10 @@ impl State {
             MouseButton::Right => {
                 self.mouse_pressed = pressed;
                 if pressed {
+                    if !self.cursor_locked {
+                        self.lock_cursor();
+                    }
+                    
                     if let Some(pos) = self.player.get_block_placement_pos(&self.world.chunks) {
                         self.world.place_block(&self.device, pos);
                     }
@@ -537,6 +556,47 @@ impl State {
 
     fn handle_mouse_scroll(&mut self, delta: &MouseScrollDelta) {
         self.player.camera_controller.handle_mouse_scroll(delta);
+    }
+
+    fn lock_cursor(&mut self) {
+        self.cursor_locked = true;
+        self.window.set_cursor_visible(false);
+        
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::JsCast;
+            let window = web_sys::window().unwrap();
+            let document = window.document().unwrap();
+            if let Some(canvas) = document.get_element_by_id("canvas") {
+                let html_canvas: web_sys::HtmlCanvasElement = canvas.dyn_into().unwrap();
+                let _ = html_canvas.request_pointer_lock();
+                let _ = html_canvas.request_fullscreen();
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use winit::window::CursorGrabMode;
+            let _ = self.window
+                .set_cursor_grab(CursorGrabMode::Confined)
+                .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked));
+        }
+    }
+
+    fn unlock_cursor(&mut self) {
+        self.cursor_locked = false;
+        self.window.set_cursor_visible(true);
+        
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                let _ = document.exit_pointer_lock();
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use winit::window::CursorGrabMode;
+            let _ = self.window.set_cursor_grab(CursorGrabMode::None);
+        }
     }
 
     fn update(&mut self, dt: instant::Duration) {
@@ -642,6 +702,50 @@ impl State {
             // );
         }
 
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: self.window.scale_factor() as f32,
+        };
+        
+        self.egui_renderer.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &self.window,
+            &view,
+            screen_descriptor,
+            |ctx| {
+                egui::Window::new("Bassicraft")
+                    .default_pos([10.0, 10.0])
+                    .show(ctx, |ui| {
+                        ui.heading("Game Stats");
+                        ui.separator();
+                        ui.label(format!("Position: {:.1}, {:.1}, {:.1}", 
+                            self.player.camera.position.x,
+                            self.player.camera.position.y,
+                            self.player.camera.position.z
+                        ));
+                        let dir = self.player.camera.direction();
+                        ui.label(format!("Direction: {:.2}, {:.2}, {:.2}",
+                            dir.x, dir.y, dir.z
+                        ));
+                        ui.separator();
+                        ui.label(format!("Chunks loaded: {}", self.world.chunks.len()));
+                        ui.separator();
+                        ui.label("Controls:");
+                        ui.label("  WASD - Move");
+                        ui.label("  Space - Jump");
+                        ui.label("  Mouse - Look around");
+                        ui.label("  Left Click - Break block");
+                        ui.label("  Right Click - Place block");
+                        ui.label("  P - Toggle cursor lock");
+                        ui.label("  ESC - Exit");
+                        ui.separator();
+                        ui.label(format!("Cursor: {}", if self.cursor_locked { "Locked" } else { "Unlocked" }));
+                    });
+            },
+        );
+
         self.queue.submit(iter::once(encoder.finish()));
         output.present();
 
@@ -649,6 +753,15 @@ impl State {
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+        if code == KeyCode::KeyP && is_pressed {
+            if self.cursor_locked {
+                self.unlock_cursor();
+            } else {
+                self.lock_cursor();
+            }
+            return;
+        }
+        
         if !self.player.camera_controller.process_keyboard(code, is_pressed) {
             match (code, is_pressed) {
                 (KeyCode::Escape, true) => event_loop.exit(),
@@ -698,7 +811,7 @@ impl ApplicationHandler<State> for App {
         }
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-        window.set_cursor_visible(false);
+        window.set_cursor_visible(true);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -755,7 +868,9 @@ impl ApplicationHandler<State> for App {
                     return;
                 }
 
-                state.player.camera_controller.handle_mouse(dx, dy);
+                if state.cursor_locked {
+                    state.player.camera_controller.handle_mouse(dx, dy);
+                }
             }
             _ => {}
         }
@@ -771,6 +886,8 @@ impl ApplicationHandler<State> for App {
             Some(canvas) => canvas,
             None => return,
         };
+
+        let event_consumed = state.egui_renderer.handle_input(&state.window, &event);
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -795,7 +912,11 @@ impl ApplicationHandler<State> for App {
                 state: btn_state,
                 button,
                 ..
-            } => state.handle_mouse_button(button, btn_state.is_pressed()),
+            } => {
+                if !event_consumed {
+                    state.handle_mouse_button(button, btn_state.is_pressed());
+                }
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 state.handle_mouse_scroll(&delta);
             }
