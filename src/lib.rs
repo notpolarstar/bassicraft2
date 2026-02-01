@@ -743,6 +743,33 @@ impl State {
                         ui.separator();
                         ui.label(format!("Cursor: {}", if self.cursor_locked { "Locked" } else { "Unlocked" }));
                     });
+
+                let screen_rect = ctx.content_rect();
+                let center = screen_rect.center();
+                let crosshair_size = 10.0;
+                let crosshair_thickness = 2.0;
+                let crosshair_color = egui::Color32::WHITE;
+                
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("crosshair"),
+                ));
+
+                painter.line_segment(
+                    [
+                        egui::pos2(center.x - crosshair_size, center.y),
+                        egui::pos2(center.x + crosshair_size, center.y),
+                    ],
+                    egui::Stroke::new(crosshair_thickness, crosshair_color),
+                );
+
+                painter.line_segment(
+                    [
+                        egui::pos2(center.x, center.y - crosshair_size),
+                        egui::pos2(center.x, center.y + crosshair_size),
+                    ],
+                    egui::Stroke::new(crosshair_thickness, crosshair_color),
+                );
             },
         );
 
