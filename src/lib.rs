@@ -742,10 +742,13 @@ impl State {
                         ui.label("  ESC - Exit");
                         ui.separator();
                         ui.label(format!("Cursor: {}", if self.cursor_locked { "Locked" } else { "Unlocked" }));
+
+                        ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
                     });
 
                 let screen_rect = ctx.content_rect();
                 let center = screen_rect.center();
+
                 let crosshair_size = 10.0;
                 let crosshair_thickness = 2.0;
                 let crosshair_color = egui::Color32::WHITE;

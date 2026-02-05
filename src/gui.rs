@@ -1,4 +1,6 @@
-use egui::{Context, Visuals};
+use std::collections::HashMap;
+
+use egui::{Context, Visuals, epaint};
 use egui_wgpu::{RendererOptions, ScreenDescriptor};
 use egui_wgpu::Renderer;
 
@@ -12,6 +14,7 @@ pub struct EguiRenderer {
     pub context: Context,
     state: State,
     renderer: Renderer,
+    texure_ids: HashMap<String, epaint::TextureId>,
 }
 
 impl EguiRenderer {
@@ -55,10 +58,13 @@ impl EguiRenderer {
             // msaa_samples,
         );
 
+        egui_extras::install_image_loaders(&egui_context);
+
         EguiRenderer {
             context: egui_context,
             state: egui_state,
             renderer: egui_renderer,
+            texure_ids: HashMap::new(),
         }
     }
 
@@ -119,5 +125,17 @@ impl EguiRenderer {
         for x in &full_output.textures_delta.free {
             self.renderer.free_texture(x)
         }
+    }
+
+    pub fn register_wgpu_texture(
+        &mut self,
+        tex_str: String,
+        device: &Device,
+        texture: &TextureView,
+        texture_filter: wgpu::FilterMode
+    ) {
+        let tex_id: epaint::TextureId = self.renderer.register_native_texture(device, texture, texture_filter);
+
+        self.texure_ids.insert(tex_str, tex_id);
     }
 }
