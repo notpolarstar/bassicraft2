@@ -9,12 +9,15 @@ use egui_wgpu::wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView}
 use egui_wgpu::wgpu;
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::winit::window::Window;
+use wgpu::util::DeviceExt;
 
 pub struct EguiRenderer {
     pub context: Context,
     state: State,
     renderer: Renderer,
     texure_ids: HashMap<String, epaint::TextureId>,
+
+    // pub texture_atlas: egui::ImageSource<'static>,
 }
 
 impl EguiRenderer {
@@ -50,7 +53,7 @@ impl EguiRenderer {
             predictable_texture_filtering: false,
         };
 
-        let egui_renderer = Renderer::new(
+        let mut egui_renderer = Renderer::new(
             device,
             output_color_format,
             renderer_options,
@@ -58,19 +61,44 @@ impl EguiRenderer {
             // msaa_samples,
         );
 
-        egui_extras::install_image_loaders(&egui_context);
+        egui_renderer.callback_resources.insert(BlockRenderResources {
+            pipeline: None,
+            texture_bind_group: None,
+            camera_bind_group: None,
+            block_meshes: Vec::new(),
+        });
+
+        // egui_extras::install_image_loaders(&egui_context);
+
+        // let egui_texture_atlas = egui::include_image!("../res/texture_atlas.png");
 
         EguiRenderer {
             context: egui_context,
             state: egui_state,
             renderer: egui_renderer,
             texure_ids: HashMap::new(),
+            // texture_atlas: egui_texture_atlas,
         }
     }
 
     pub fn handle_input(&mut self, window: &Window, event: &WindowEvent) -> bool {
         let response = self.state.on_window_event(window, event);
         response.consumed
+    }
+
+    pub fn set_block_render_resources(
+        &mut self,
+        pipeline: wgpu::RenderPipeline,
+        texture_bind_group: wgpu::BindGroup,
+        camera_bind_group: wgpu::BindGroup,
+        block_meshes: Vec<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    ) {
+        self.renderer.callback_resources.insert(BlockRenderResources {
+            pipeline: Some(pipeline),
+            texture_bind_group: Some(texture_bind_group),
+            camera_bind_group: Some(camera_bind_group),
+            block_meshes,
+        });
     }
 
     pub fn draw(
@@ -137,5 +165,68 @@ impl EguiRenderer {
         let tex_id: epaint::TextureId = self.renderer.register_native_texture(device, texture, texture_filter);
 
         self.texure_ids.insert(tex_str, tex_id);
+    }
+
+    pub fn custom_painting(&mut self, ui: &mut egui::Ui) {
+        let (rect, _response) =
+            ui.allocate_exact_size(egui::Vec2::splat(300.0), egui::Sense::drag());
+
+        // self.angle += response.drag_motion().x * 0.01;
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            rect,
+            CustomBlockCallback { block_type: 0 },
+        ));
+    }
+}
+
+pub struct CustomBlockCallback {
+    pub block_type: u32,
+}
+
+impl egui_wgpu::CallbackTrait for CustomBlockCallback {
+    fn prepare(
+        &self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        _resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        resources: &egui_wgpu::CallbackResources,
+    ) {
+        let resources: &BlockRenderResources = resources.get().unwrap();
+        resources.paint(render_pass, self.block_type);
+    }
+}
+
+pub struct BlockRenderResources {
+    pub pipeline: Option<wgpu::RenderPipeline>,
+    pub texture_bind_group: Option<wgpu::BindGroup>,
+    pub camera_bind_group: Option<wgpu::BindGroup>,
+    pub block_meshes: Vec<(wgpu::Buffer, wgpu::Buffer, u32)>,
+}
+
+impl BlockRenderResources {
+    pub fn paint(&self, render_pass: &mut wgpu::RenderPass<'_>, block_type: u32) {
+        if let (Some(pipeline), Some(texture_bind_group), Some(camera_bind_group)) = 
+            (&self.pipeline, &self.texture_bind_group, &self.camera_bind_group) {
+            if let Some((vertex_buffer, index_buffer, num_indices)) = self.block_meshes.get(block_type as usize) {
+                if *num_indices > 0 {
+                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_bind_group(0, texture_bind_group, &[]);
+                    render_pass.set_bind_group(1, camera_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..*num_indices, 0, 0..1);
+                }
+            }
+        }
     }
 }

@@ -443,12 +443,151 @@ impl State {
 
         let world = world::World::new(&device, &queue, 0x1f6c2);
 
-        let egui_renderer = gui::EguiRenderer::new(
+        let mut egui_renderer = gui::EguiRenderer::new(
             &device,
             config.format,
             None,
             1,
             &window,
+        );
+
+        let ui_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("UI Block Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[block::BlockVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        use crate::block::BlockVertex;
+
+        let mut block_meshes = Vec::new();
+        
+        for block_type in 0..8 {
+            let tex_x = (block_type % 16) as f32 / 16.0;
+            let tex_y = (block_type / 16) as f32 / 16.0;
+            let tex_coords = [tex_x, tex_y, tex_x + 0.0625, tex_y + 0.0625];
+            
+            let vertices = vec![
+                // Front face
+                BlockVertex { position: [-0.5, -0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
+                BlockVertex { position: [-0.5,  0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                // Back face
+                BlockVertex { position: [ 0.5, -0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
+                BlockVertex { position: [-0.5, -0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
+                BlockVertex { position: [-0.5,  0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                // Left face
+                BlockVertex { position: [-0.5, -0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
+                BlockVertex { position: [-0.5, -0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
+                BlockVertex { position: [-0.5,  0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
+                BlockVertex { position: [-0.5,  0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                // Right face
+                BlockVertex { position: [ 0.5, -0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                // Top face
+                BlockVertex { position: [-0.5,  0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
+                BlockVertex { position: [-0.5,  0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                // Bottom face
+                BlockVertex { position: [-0.5, -0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
+                BlockVertex { position: [-0.5, -0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+            ];
+            
+            let indices: Vec<u32> = (0..6)
+                .flat_map(|i| {
+                    let base = i * 4;
+                    vec![base, base + 1, base + 2, base + 2, base + 3, base]
+                })
+                .collect();
+
+            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("UI Block {} Vertex Buffer", block_type)),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("UI Block {} Index Buffer", block_type)),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+            
+            block_meshes.push((vertex_buffer, index_buffer, indices.len() as u32));
+        }
+
+        use cgmath::{Matrix4, Vector3, Point3, Deg, perspective};
+        let ui_camera_pos = Vector3::new(1.5, 1.5, 1.5);
+        let ui_camera_target = Vector3::new(0.0, 0.0, 0.0);
+        let ui_view = Matrix4::look_at_rh(
+            Point3::new(ui_camera_pos.x, ui_camera_pos.y, ui_camera_pos.z),
+            Point3::new(ui_camera_target.x, ui_camera_target.y, ui_camera_target.z),
+            Vector3::unit_y(),
+        );
+        let ui_proj = perspective(Deg(45.0), 1.0, 0.1, 100.0);
+        
+        let ui_camera_uniform = CameraUniform {
+            view_position: [ui_camera_pos.x, ui_camera_pos.y, ui_camera_pos.z, 1.0],
+            view_proj: (ui_proj * ui_view).into(),
+        };
+
+        let ui_camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("UI Camera Buffer"),
+            contents: bytemuck::cast_slice(&[ui_camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let ui_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("UI Camera Bind Group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ui_camera_buffer.as_entire_binding(),
+            }],
+        });
+
+        egui_renderer.set_block_render_resources(
+            ui_render_pipeline,
+            world.texture_atlas.diffuse_bind_group.clone(),
+            ui_camera_bind_group,
+            block_meshes,
         );
 
         Ok(Self {
@@ -743,11 +882,27 @@ impl State {
                         ui.separator();
                         ui.label(format!("Cursor: {}", if self.cursor_locked { "Locked" } else { "Unlocked" }));
 
-                        ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
+                        // ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
                     });
 
                 let screen_rect = ctx.content_rect();
+                let screen_size = screen_rect.size();
                 let center = screen_rect.center();
+                
+                for i in 0..8 {
+                    egui::Area::new(egui::Id::new(format!("inv_slot {}", i)))
+                        .fixed_pos(egui::pos2(center.x - 64.0 * (8 as f32 / 2.0) + 64.0 * i as f32, screen_size.y - 60.0))
+                        .show(ctx, |ui| {
+                            // ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
+                            egui::Frame::canvas(ui.style()).show(ui, |ui| {
+                                let (rect, _response) = ui.allocate_exact_size(egui::Vec2::splat(60.0), egui::Sense::empty());
+                                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                                    rect,
+                                    gui::CustomBlockCallback { block_type: i },
+                                ));
+                            });
+                    });
+                }
 
                 let crosshair_size = 10.0;
                 let crosshair_thickness = 2.0;
