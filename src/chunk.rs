@@ -4,9 +4,9 @@ use noise::{NoiseFn, OpenSimplex};
 
 use crate::block::{Block, BlockVertex, Face};
 
-const CHUNK_X_SIZE: usize = 16;
-const CHUNK_Y_SIZE: usize = 256;
-const CHUNK_Z_SIZE: usize = 16;
+pub const CHUNK_X_SIZE: usize = 16;
+pub const CHUNK_Y_SIZE: usize = 256;
+pub const CHUNK_Z_SIZE: usize = 16;
 
 #[derive(Clone, Debug)]
 pub struct Mesh {
@@ -163,6 +163,16 @@ impl Chunk {
     }
 
     fn update_block_faces(&mut self) {
+        self.update_block_faces_with_neighbors(None, None, None, None);
+    }
+
+    pub fn update_block_faces_with_neighbors(
+        &mut self,
+        left_chunk: Option<&Chunk>,
+        right_chunk: Option<&Chunk>,
+        back_chunk: Option<&Chunk>,
+        front_chunk: Option<&Chunk>,
+    ) {
         for x in 0..CHUNK_X_SIZE {
             for y in 0..CHUNK_Y_SIZE {
                 for z in 0..CHUNK_Z_SIZE {
@@ -172,42 +182,61 @@ impl Chunk {
                         continue;
                     }
                     let mut close_blocks = [false; 6];
+                    
                     // BACK (-z)
                     close_blocks[0] = if z == 0 {
-                        false
+                        back_chunk
+                            .and_then(|chunk| chunk.get_block([x as i32, y as i32, (CHUNK_Z_SIZE - 1) as i32]))
+                            .map(|block| block.mat != 0)
+                            .unwrap_or(false)
                     } else {
                         self.blocks[x][y][z-1].mat != 0
                     };
+                    
                     // FRONT (+z)
                     close_blocks[1] = if z == CHUNK_Z_SIZE-1 {
-                        false
+                        front_chunk
+                            .and_then(|chunk| chunk.get_block([x as i32, y as i32, 0]))
+                            .map(|block| block.mat != 0)
+                            .unwrap_or(false)
                     } else {
                         self.blocks[x][y][z+1].mat != 0
                     };
+                    
                     // LEFT (-x)
                     close_blocks[2] = if x == 0 {
-                        false
+                        left_chunk
+                            .and_then(|chunk| chunk.get_block([(CHUNK_X_SIZE - 1) as i32, y as i32, z as i32]))
+                            .map(|block| block.mat != 0)
+                            .unwrap_or(false)
                     } else {
                         self.blocks[x-1][y][z].mat != 0
                     };
+                    
                     // RIGHT (+x)
                     close_blocks[3] = if x == CHUNK_X_SIZE-1 {
-                        false
+                        right_chunk
+                            .and_then(|chunk| chunk.get_block([0, y as i32, z as i32]))
+                            .map(|block| block.mat != 0)
+                            .unwrap_or(false)
                     } else {
                         self.blocks[x+1][y][z].mat != 0
                     };
+                    
                     // TOP (+y)
                     close_blocks[4] = if y == CHUNK_Y_SIZE-1 {
                         false
                     } else {
                         self.blocks[x][y+1][z].mat != 0
                     };
+                    
                     // BOTTOM (-y)
                     close_blocks[5] = if y == 0 {
                         false
                     } else {
                         self.blocks[x][y-1][z].mat != 0
                     };
+                    
                     self.blocks[x][y][z] = Block::new(block_type, close_blocks);
                 }
             }
@@ -300,5 +329,16 @@ impl Chunk {
         pos[0] >= chunk_world_x_min && pos[0] < chunk_world_x_max
             && pos[1] >= 0 && pos[1] < CHUNK_Y_SIZE as i32
             && pos[2] >= chunk_world_z_min && pos[2] < chunk_world_z_max
+    }
+    
+    pub fn get_local_pos(&self, pos: [i32; 3]) -> [i32; 3] {
+        let local_x = pos[0] - self.pos[0] * CHUNK_X_SIZE as i32;
+        let local_y = pos[1];
+        let local_z = pos[2] - self.pos[1] * CHUNK_Z_SIZE as i32;
+        [local_x, local_y, local_z]
+    }
+    
+    pub fn regenerate_mesh(&mut self) {
+        self.mesh = Mesh::new(self.pos, &self.blocks);
     }
 }
