@@ -685,7 +685,7 @@ impl State {
                     }
                     
                     if let Some(pos) = self.player.get_block_placement_pos(&self.world.chunks) {
-                        self.world.place_block(&self.device, pos);
+                        self.world.place_block(&self.device, pos, self.player.selected_block);
                     }
                 }
             }
@@ -947,7 +947,7 @@ impl State {
             return;
         }
         
-        if !self.player.camera_controller.process_keyboard(code, is_pressed) {
+        if !self.player.process_keyboard(code, is_pressed) {
             match (code, is_pressed) {
                 (KeyCode::Escape, true) => event_loop.exit(),
                 _ => {}

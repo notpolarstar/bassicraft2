@@ -85,12 +85,12 @@ impl Projection {
 
 #[derive(Debug)]
 pub struct CameraController {
-    amount_left: f32,
-    amount_right: f32,
-    amount_forward: f32,
-    amount_backward: f32,
-    amount_up: f32,
-    amount_down: f32,
+    pub amount_left: f32,
+    pub amount_right: f32,
+    pub amount_forward: f32,
+    pub amount_backward: f32,
+    pub amount_up: f32,
+    pub amount_down: f32,
     rotate_horizontal: f32,
     rotate_vertical: f32,
     scroll: f32,

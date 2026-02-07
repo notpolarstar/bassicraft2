@@ -1,3 +1,6 @@
+use winit::keyboard::KeyCode;
+use winit::event::*;
+
 use crate::camera;
 use crate::chunk;
 
@@ -5,6 +8,9 @@ pub struct Player {
     pub camera: camera::Camera,
     pub projection: camera::Projection,
     pub camera_controller: camera::CameraController,
+
+    pub selected_block: u32,
+    pub hotbar: [u32; 8],
 }
 
 pub const MAX_BLOCK_POINT_DISTANCE: f32 = 9.0;
@@ -21,12 +27,14 @@ impl Player {
             camera: camera,
             projection: projection,
             camera_controller: camera_controller,
+            selected_block: 1,
+            hotbar: core::array::from_fn(|i| (i + 1) as u32),
         }
     }
 
     pub fn get_block_pointed_at(&self, chunks: &Vec<chunk::Chunk>) -> Option<[i32; 3]> {
         let max_distance = MAX_BLOCK_POINT_DISTANCE;
-        let step = 0.1;
+        let step = 0.05;
         let mut distance = 0.0;
 
         let origin = self.camera.position;
@@ -122,5 +130,45 @@ impl Player {
         }
 
         None
+    }
+
+    pub fn change_selected_block(&mut self, num: usize) {
+        self.selected_block = self.hotbar[num];
+    }
+
+    pub fn process_keyboard(&mut self, key: KeyCode, state: bool) -> bool {
+        let amount = if state { 1.0 } else { 0.0 };
+        match key {
+            KeyCode::KeyW | KeyCode::ArrowUp => {
+                self.camera_controller.amount_forward = amount;
+                true
+            }
+            KeyCode::KeyS | KeyCode::ArrowDown => {
+                self.camera_controller.amount_backward = amount;
+                true
+            }
+            KeyCode::KeyA | KeyCode::ArrowLeft => {
+                self.camera_controller.amount_left = amount;
+                true
+            }
+            KeyCode::KeyD | KeyCode::ArrowRight => {
+                self.camera_controller.amount_right = amount;
+                true
+            }
+            KeyCode::Space => {
+                self.camera_controller.amount_up = amount;
+                true
+            }
+            KeyCode::ShiftLeft => {
+                self.camera_controller.amount_down = amount;
+                true
+            }
+            KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4
+            | KeyCode::Digit5 | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 => {
+                self.change_selected_block(key as usize - KeyCode::Digit1 as usize);
+                true
+            }
+            _ => false,
+        }
     }
 }

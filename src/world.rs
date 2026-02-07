@@ -131,12 +131,12 @@ impl World {
         }
     }
 
-    pub fn place_block(&mut self, device: &wgpu::Device, pos: [i32; 3]) {
+    pub fn place_block(&mut self, device: &wgpu::Device, pos: [i32; 3], selected_block: u32) {
         if let Some((chunk_index, _)) = self.chunks.iter_mut().enumerate().find(|(_, c)| c.contains_position(pos)) {
             let chunk_pos = self.chunks[chunk_index].pos;
             let local_pos = self.chunks[chunk_index].get_local_pos(pos);
             
-            self.chunks[chunk_index].place_block(pos);
+            self.chunks[chunk_index].place_block(pos, selected_block);
             self.update_chunk_mesh(device, chunk_index);
 
             if local_pos[0] == 0 {

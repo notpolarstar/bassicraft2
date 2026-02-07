@@ -275,7 +275,7 @@ impl Chunk {
         self.mesh = Mesh::new(self.pos, &self.blocks);
     }
 
-    pub fn place_block(&mut self, pos: [i32; 3]) {
+    pub fn place_block(&mut self, pos: [i32; 3], block_type: u32) {
         let local_x = pos[0] - self.pos[0] * CHUNK_X_SIZE as i32;
         let local_y = pos[1];
         let local_z = pos[2] - self.pos[1] * CHUNK_Z_SIZE as i32;
@@ -292,7 +292,7 @@ impl Chunk {
         if self.blocks[x][y][z].mat != 0 {
             return;
         }
-        self.blocks[x][y][z] = Block::new(8, [false; 6]);
+        self.blocks[x][y][z] = Block::new(block_type, [false; 6]);
         self.update_block_faces();
         self.mesh = Mesh::new(self.pos, &self.blocks);
     }
