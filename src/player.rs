@@ -11,6 +11,9 @@ pub struct Player {
 
     pub selected_block: u32,
     pub hotbar: [u32; 8],
+
+    pub cursor_locked: bool,
+    pub show_inventory: bool,
 }
 
 pub const MAX_BLOCK_POINT_DISTANCE: f32 = 9.0;
@@ -29,6 +32,8 @@ impl Player {
             camera_controller: camera_controller,
             selected_block: 1,
             hotbar: core::array::from_fn(|i| (i + 1) as u32),
+            cursor_locked: false,
+            show_inventory: false,
         }
     }
 
@@ -166,6 +171,14 @@ impl Player {
             KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4
             | KeyCode::Digit5 | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 => {
                 self.change_selected_block(key as usize - KeyCode::Digit1 as usize);
+                true
+            }
+            KeyCode::KeyE => {
+                if !state {
+                    return false
+                }
+                self.show_inventory = !self.show_inventory;
+                self.cursor_locked = !self.cursor_locked;
                 true
             }
             _ => false,

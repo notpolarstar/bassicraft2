@@ -167,7 +167,7 @@ pub struct State {
     world: world::World,
 
     mouse_pressed: bool,
-    cursor_locked: bool,
+    // cursor_locked: bool,
 }
 
 impl State {
@@ -493,7 +493,7 @@ impl State {
 
         let mut block_meshes = Vec::new();
         
-        for block_type in 0..8 {
+        for block_type in 0..64 {
             let tex_x = (block_type % 16) as f32 / 16.0;
             let tex_y = (block_type / 16) as f32 / 16.0;
             let tex_coords = [tex_x, tex_y, tex_x + 0.0625, tex_y + 0.0625];
@@ -617,7 +617,7 @@ impl State {
             // obj_model,
             world: world,
             mouse_pressed: false,
-            cursor_locked: false,
+            // cursor_locked: false,
         })
     }
 
@@ -643,7 +643,7 @@ impl State {
         match button {
             MouseButton::Left => {
                 self.mouse_pressed = pressed;
-                if pressed {
+                if pressed && !self.player.show_inventory {
                     #[cfg(target_arch = "wasm32")]
                     {
                         use wasm_bindgen::JsCast;
@@ -653,6 +653,7 @@ impl State {
                         let html_canvas: web_sys::HtmlCanvasElement = canvas.dyn_into().unwrap();
                         html_canvas.request_pointer_lock();
                         html_canvas.request_fullscreen();
+                        self.lock_cursor();
                     }
                     #[cfg(not(target_arch = "wasm32"))]
                     {
@@ -680,9 +681,9 @@ impl State {
             MouseButton::Right => {
                 self.mouse_pressed = pressed;
                 if pressed {
-                    if !self.cursor_locked {
-                        self.lock_cursor();
-                    }
+                    // if !self.player.cursor_locked {
+                    //     self.lock_cursor();
+                    // }
                     
                     if let Some(pos) = self.player.get_block_placement_pos(&self.world.chunks) {
                         self.world.place_block(&self.device, pos, self.player.selected_block);
@@ -698,7 +699,7 @@ impl State {
     }
 
     fn lock_cursor(&mut self) {
-        self.cursor_locked = true;
+        self.player.cursor_locked = true;
         self.window.set_cursor_visible(false);
         
         #[cfg(target_arch = "wasm32")]
@@ -722,7 +723,7 @@ impl State {
     }
 
     fn unlock_cursor(&mut self) {
-        self.cursor_locked = false;
+        self.player.cursor_locked = false;
         self.window.set_cursor_visible(true);
         
         #[cfg(target_arch = "wasm32")]
@@ -854,40 +855,74 @@ impl State {
             &view,
             screen_descriptor,
             |ctx| {
-                egui::Window::new("Bassicraft")
-                    .default_pos([10.0, 10.0])
-                    .show(ctx, |ui| {
-                        ui.heading("Game Stats");
-                        ui.separator();
-                        ui.label(format!("Position: {:.1}, {:.1}, {:.1}", 
-                            self.player.camera.position.x,
-                            self.player.camera.position.y,
-                            self.player.camera.position.z
-                        ));
-                        let dir = self.player.camera.direction();
-                        ui.label(format!("Direction: {:.2}, {:.2}, {:.2}",
-                            dir.x, dir.y, dir.z
-                        ));
-                        ui.separator();
-                        ui.label(format!("Chunks loaded: {}", self.world.chunks.len()));
-                        ui.separator();
-                        ui.label("Controls:");
-                        ui.label("  WASD - Move");
-                        ui.label("  Space - Jump");
-                        ui.label("  Mouse - Look around");
-                        ui.label("  Left Click - Break block");
-                        ui.label("  Right Click - Place block");
-                        ui.label("  P - Toggle cursor lock");
-                        ui.label("  ESC - Exit");
-                        ui.separator();
-                        ui.label(format!("Cursor: {}", if self.cursor_locked { "Locked" } else { "Unlocked" }));
-
-                        // ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
-                    });
-
                 let screen_rect = ctx.content_rect();
                 let screen_size = screen_rect.size();
                 let center = screen_rect.center();
+
+                if !self.player.cursor_locked {
+                    egui::Window::new("Bassicraft")
+                        .default_pos([10.0, 10.0])
+                        .show(ctx, |ui| {
+                            ui.heading("Game Stats");
+                            ui.separator();
+                            ui.label(format!("Position: {:.1}, {:.1}, {:.1}", 
+                                self.player.camera.position.x,
+                                self.player.camera.position.y,
+                                self.player.camera.position.z
+                            ));
+                            let dir = self.player.camera.direction();
+                            ui.label(format!("Direction: {:.2}, {:.2}, {:.2}",
+                                dir.x, dir.y, dir.z
+                            ));
+                            ui.separator();
+                            ui.label(format!("Chunks loaded: {}", self.world.chunks.len()));
+                            ui.separator();
+                            ui.label("Controls:");
+                            ui.label("  WASD - Move");
+                            ui.label("  Space - Jump");
+                            ui.label("  Mouse - Look around");
+                            ui.label("  Left Click - Break block");
+                            ui.label("  Right Click - Place block");
+                            ui.label("  P - Toggle cursor lock");
+                            ui.label("  ESC - Exit");
+                            ui.separator();
+                            ui.label(format!("Cursor: {}", if self.player.cursor_locked { "Locked" } else { "Unlocked" }));
+
+                            // ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
+                        });
+                    }
+
+                if self.player.show_inventory {
+                    egui::Window::new("Inventory")
+                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                        .resizable(false)
+                        .collapsible(false)
+                        .show(ctx, |ui| {
+                            ui.add_space(5.0);
+                            egui::Grid::new("Inventory")
+                                .num_columns(8)
+                                .spacing([5.0, 5.0])
+                                .show(ui, |ui| {
+                                    for i in 0..64 {
+                                        egui::Frame::canvas(ui.style())
+                                            .inner_margin(2.0)
+                                            .show(ui, |ui| {
+                                                let (rect, _response) = ui.allocate_exact_size(
+                                                    egui::Vec2::splat(60.0), 
+                                                    egui::Sense::click()
+                                                );
+                                                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                                                    rect,
+                                                    gui::CustomBlockCallback { block_type: i },
+                                                ));
+                                            });
+                                        if (i + 1) % 8 == 0 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                        });
+                }
                 
                 for i in 0..8 {
                     egui::Area::new(egui::Id::new(format!("inv_slot {}", i)))
@@ -904,30 +939,32 @@ impl State {
                     });
                 }
 
-                let crosshair_size = 10.0;
-                let crosshair_thickness = 2.0;
-                let crosshair_color = egui::Color32::WHITE;
-                
-                let painter = ctx.layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    egui::Id::new("crosshair"),
-                ));
-
-                painter.line_segment(
-                    [
-                        egui::pos2(center.x - crosshair_size, center.y),
-                        egui::pos2(center.x + crosshair_size, center.y),
-                    ],
-                    egui::Stroke::new(crosshair_thickness, crosshair_color),
-                );
-
-                painter.line_segment(
-                    [
-                        egui::pos2(center.x, center.y - crosshair_size),
-                        egui::pos2(center.x, center.y + crosshair_size),
-                    ],
-                    egui::Stroke::new(crosshair_thickness, crosshair_color),
-                );
+                if self.player.cursor_locked {
+                    let crosshair_size = 10.0;
+                    let crosshair_thickness = 2.0;
+                    let crosshair_color = egui::Color32::WHITE;
+                    
+                    let painter = ctx.layer_painter(egui::LayerId::new(
+                        egui::Order::Foreground,
+                        egui::Id::new("crosshair"),
+                    ));
+    
+                    painter.line_segment(
+                        [
+                            egui::pos2(center.x - crosshair_size, center.y),
+                            egui::pos2(center.x + crosshair_size, center.y),
+                        ],
+                        egui::Stroke::new(crosshair_thickness, crosshair_color),
+                    );
+    
+                    painter.line_segment(
+                        [
+                            egui::pos2(center.x, center.y - crosshair_size),
+                            egui::pos2(center.x, center.y + crosshair_size),
+                        ],
+                        egui::Stroke::new(crosshair_thickness, crosshair_color),
+                    );
+                }
             },
         );
 
@@ -939,7 +976,7 @@ impl State {
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
         if code == KeyCode::KeyP && is_pressed {
-            if self.cursor_locked {
+            if self.player.cursor_locked {
                 self.unlock_cursor();
             } else {
                 self.lock_cursor();
@@ -952,6 +989,12 @@ impl State {
                 (KeyCode::Escape, true) => event_loop.exit(),
                 _ => {}
             }
+        }
+
+        if self.player.show_inventory {
+            self.unlock_cursor();
+        } else {
+            self.lock_cursor();
         }
     }
 }
@@ -1053,7 +1096,7 @@ impl ApplicationHandler<State> for App {
                     return;
                 }
 
-                if state.cursor_locked {
+                if state.player.cursor_locked {
                     state.player.camera_controller.handle_mouse(dx, dy);
                 }
             }
