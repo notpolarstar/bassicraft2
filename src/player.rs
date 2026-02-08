@@ -11,6 +11,7 @@ pub struct Player {
 
     pub selected_block: u32,
     pub hotbar: [u32; 8],
+    pub selected_hotbar_slot: usize,
 
     pub cursor_locked: bool,
     pub show_inventory: bool,
@@ -32,6 +33,7 @@ impl Player {
             camera_controller: camera_controller,
             selected_block: 1,
             hotbar: core::array::from_fn(|i| (i + 1) as u32),
+            selected_hotbar_slot: 0,
             cursor_locked: false,
             show_inventory: false,
         }
@@ -138,7 +140,13 @@ impl Player {
     }
 
     pub fn change_selected_block(&mut self, num: usize) {
+        self.selected_hotbar_slot = num;
         self.selected_block = self.hotbar[num];
+    }
+
+    pub fn set_hotbar_slot(&mut self, block_type: u32) {
+        self.hotbar[self.selected_hotbar_slot] = block_type;
+        self.selected_block = block_type;
     }
 
     pub fn process_keyboard(&mut self, key: KeyCode, state: bool) -> bool {
@@ -170,6 +178,9 @@ impl Player {
             }
             KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4
             | KeyCode::Digit5 | KeyCode::Digit6 | KeyCode::Digit7 | KeyCode::Digit8 => {
+                if !state {
+                    return false
+                }
                 self.change_selected_block(key as usize - KeyCode::Digit1 as usize);
                 true
             }

@@ -907,10 +907,16 @@ impl State {
                                         egui::Frame::canvas(ui.style())
                                             .inner_margin(2.0)
                                             .show(ui, |ui| {
-                                                let (rect, _response) = ui.allocate_exact_size(
+                                                let (rect, response) = ui.allocate_exact_size(
                                                     egui::Vec2::splat(60.0), 
                                                     egui::Sense::click()
                                                 );
+                                                
+                                                if response.clicked() {
+                                                    // 0 is air
+                                                    self.player.set_hotbar_slot(i + 1);
+                                                }
+                                                
                                                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                                                     rect,
                                                     gui::CustomBlockCallback { block_type: i },
@@ -928,12 +934,19 @@ impl State {
                     egui::Area::new(egui::Id::new(format!("inv_slot {}", i)))
                         .fixed_pos(egui::pos2(center.x - 64.0 * (8 as f32 / 2.0) + 64.0 * i as f32, screen_size.y - 60.0))
                         .show(ctx, |ui| {
-                            // ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
-                            egui::Frame::canvas(ui.style()).show(ui, |ui| {
-                                let (rect, _response) = ui.allocate_exact_size(egui::Vec2::splat(60.0), egui::Sense::empty());
+                            let is_selected = self.player.selected_hotbar_slot == i;
+                            let mut frame = egui::Frame::canvas(ui.style());
+                            
+                            if is_selected {
+                                frame = frame.stroke(egui::Stroke::new(3.0, egui::Color32::WHITE));
+                            }
+                            
+                            frame.show(ui, |ui| {
+                                let (rect, _response) = ui.allocate_exact_size(egui::Vec2::splat(55.0), egui::Sense::empty());
                                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                                     rect,
-                                    gui::CustomBlockCallback { block_type: i },
+                                    // 0 is air
+                                    gui::CustomBlockCallback { block_type: self.player.hotbar[i].saturating_sub(1) },
                                 ));
                             });
                     });
