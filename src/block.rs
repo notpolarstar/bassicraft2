@@ -116,6 +116,9 @@ pub struct Block {
     pub faces: [Option<Face>; 6],
 }
 
+// TEMP, MAKE ACTUAL CORRECT BLOCK LOADING SYSTEM LATER FOR "SPECIAL" BLOCKS (DOORS, STAIRS, SHRUBS, FLOWERS, ...) INSTEAD OF HARDCODING EVERYTHING >:(
+const NON_SOLID_BLOCKS: &[BlockType] = &[0, 12, 29, 30, 31, 39, 40, 50, 53, 56, 57, 64];
+
 impl Block {
     pub fn new(mat: BlockType, close_blocks: [bool; 6]) -> Self {
         if mat == 0 {
@@ -144,5 +147,9 @@ impl Block {
 
     pub fn is_air(&self) -> bool {
         self.mat == 0
+    }
+
+    pub fn is_blocktype_solid(mat: BlockType) -> bool {
+        !NON_SOLID_BLOCKS.contains(&mat)
     }
 }

@@ -231,54 +231,54 @@ impl World {
                     close_blocks[0] = if z == 0 {
                         back_blocks.as_ref()
                             .and_then(|blocks| blocks.get(x).and_then(|col| col.get(y)))
-                            .map(|&b| b != 0)
+                            .map(|&b| Block::is_blocktype_solid(b))
                             .unwrap_or(false)
                     } else {
-                        chunk.blocks[x][y][z-1].mat != 0
+                        Block::is_blocktype_solid(chunk.blocks[x][y][z-1].mat)
                     };
                     
                     // FRONT (+z)
                     close_blocks[1] = if z == CHUNK_Z_SIZE - 1 {
                         front_blocks.as_ref()
                             .and_then(|blocks| blocks.get(x).and_then(|col| col.get(y)))
-                            .map(|&b| b != 0)
+                            .map(|&b| Block::is_blocktype_solid(b))
                             .unwrap_or(false)
                     } else {
-                        chunk.blocks[x][y][z+1].mat != 0
+                        Block::is_blocktype_solid(chunk.blocks[x][y][z+1].mat)
                     };
                     
                     // LEFT (-x)
                     close_blocks[2] = if x == 0 {
                         left_blocks.as_ref()
                             .and_then(|blocks| blocks.get(z).and_then(|col| col.get(y)))
-                            .map(|&b| b != 0)
+                            .map(|&b| Block::is_blocktype_solid(b))
                             .unwrap_or(false)
                     } else {
-                        chunk.blocks[x-1][y][z].mat != 0
+                        Block::is_blocktype_solid(chunk.blocks[x-1][y][z].mat)
                     };
                     
                     // RIGHT (+x)
                     close_blocks[3] = if x == CHUNK_X_SIZE - 1 {
                         right_blocks.as_ref()
                             .and_then(|blocks| blocks.get(z).and_then(|col| col.get(y)))
-                            .map(|&b| b != 0)
+                            .map(|&b| Block::is_blocktype_solid(b))
                             .unwrap_or(false)
                     } else {
-                        chunk.blocks[x+1][y][z].mat != 0
+                        Block::is_blocktype_solid(chunk.blocks[x+1][y][z].mat)
                     };
                     
                     // TOP (+y)
                     close_blocks[4] = if y == CHUNK_Y_SIZE - 1 {
                         false
                     } else {
-                        chunk.blocks[x][y+1][z].mat != 0
+                        Block::is_blocktype_solid(chunk.blocks[x][y+1][z].mat)
                     };
                     
                     // BOTTOM (-y)
                     close_blocks[5] = if y == 0 {
                         false
                     } else {
-                        chunk.blocks[x][y-1][z].mat != 0
+                        Block::is_blocktype_solid(chunk.blocks[x][y-1][z].mat)
                     };
                     
                     chunk.blocks[x][y][z] = Block::new(block_type, close_blocks);

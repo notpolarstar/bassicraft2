@@ -369,7 +369,7 @@ impl State {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -465,7 +465,7 @@ impl State {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -873,6 +873,9 @@ impl State {
                             let dir = self.player.camera.direction();
                             ui.label(format!("Direction: {:.2}, {:.2}, {:.2}",
                                 dir.x, dir.y, dir.z
+                            ));
+                            ui.label(format!("Selected block: {}",
+                                self.player.selected_block
                             ));
                             ui.separator();
                             ui.label(format!("Chunks loaded: {}", self.world.chunks.len()));
