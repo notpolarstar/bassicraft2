@@ -8,6 +8,7 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
+use cgmath::*;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -117,14 +118,14 @@ impl InstanceRaw {
     }
 }
 
-// const NUM_INSTANCES_PER_ROW: u32 = 10;
-// const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-//     NUM_INSTANCES_PER_ROW as f32 * 0.5,
-//     0.0,
-//     NUM_INSTANCES_PER_ROW as f32 * 0.5,
-// );
+const NUM_INSTANCES_PER_ROW: u32 = 10;
+const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+    NUM_INSTANCES_PER_ROW as f32 * 0.5,
+    0.0,
+    NUM_INSTANCES_PER_ROW as f32 * 0.5,
+);
 
-// const ROTATION_SPEED: f32 = (2.0 * std::f32::consts::PI / 60.0) / 100.0;
+const ROTATION_SPEED: f32 = (2.0 * std::f32::consts::PI / 60.0) / 100.0;
 
 pub struct State {
     egui_renderer: gui::EguiRenderer,
@@ -157,17 +158,18 @@ pub struct State {
     // camera_controller: CameraController,
     // camera_controller: camera::CameraController,
 
-    // instances: Vec<Instance>,
-    // instance_buffer: wgpu::Buffer,
+    instances: Vec<Instance>,
+    instance_buffer: wgpu::Buffer,
 
     depth_texture: texture::Texture,
 
-    // obj_model: model::Model,
+    obj_model: model::Model,
 
     world: world::World,
 
     mouse_pressed: bool,
-    // cursor_locked: bool,
+
+    model_rendering_pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
@@ -287,6 +289,7 @@ impl State {
         });
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let model_shader = device.create_shader_module(wgpu::include_wgsl!("model_shader.wgsl"));
 
         // let camera = Camera {
         //     eye: (0.0, 1.0, 2.0).into(),
@@ -403,43 +406,43 @@ impl State {
             cache: None,
         });
 
-        // const SPACE_BETWEEN: f32 = 3.0;
-        // let instances = (0..NUM_INSTANCES_PER_ROW)
-        //     .flat_map(|z| {
-        //         (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-        //             let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-        //             let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+        const SPACE_BETWEEN: f32 = 3.0;
+        let instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
-        //             let position = cgmath::Vector3 { x: x, y: 0.0, z: z };
+                    let position = cgmath::Vector3 { x: x, y: 100.0, z: z };
 
-        //             let rotation = if position.is_zero() {
-        //                 cgmath::Quaternion::from_axis_angle(
-        //                     cgmath::Vector3::unit_z(),
-        //                     cgmath::Deg(0.0),
-        //                 )
-        //             } else {
-        //                 cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-        //             };
+                    let rotation = if position.is_zero() {
+                        cgmath::Quaternion::from_axis_angle(
+                            cgmath::Vector3::unit_z(),
+                            cgmath::Deg(0.0),
+                        )
+                    } else {
+                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    };
 
-        //             Instance {
-        //                 position: position,
-        //                 rotation: rotation,
-        //             }
-        //         })
-        //     })
-        //     .collect::<Vec<_>>();
+                    Instance {
+                        position: position,
+                        rotation: rotation,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
 
-        // let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        // let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("Instance Buffer"),
-        //     contents: bytemuck::cast_slice(&instance_data),
-        //     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        // });
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
 
-        // let obj_model =
-        //     resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-        //         .await
-        //         .unwrap();
+        let obj_model =
+            resources::load_model("steve.obj", &device, &queue, &texture_bind_group_layout)
+                .await
+                .unwrap();
 
         let world = world::World::new(&device, &queue, 0x1f6c2);
 
@@ -480,6 +483,50 @@ impl State {
                 conservative: false,
             },
             depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        let model_rendering_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Model Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &model_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &model_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -611,12 +658,13 @@ impl State {
             camera_buffer,
             camera_bind_group,
             // camera_controller,
-            // instances,
-            // instance_buffer,
+            instances,
+            instance_buffer,
             depth_texture,
-            // obj_model,
+            obj_model,
             world: world,
             mouse_pressed: false,
+            model_rendering_pipeline,
             // cursor_locked: false,
         })
     }
@@ -750,21 +798,21 @@ impl State {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        // for instance in &mut self.instances {
-        //     let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
-        //     let current = instance.rotation;
-        //     instance.rotation = amount * current;
-        // }
-        // let instance_data = self
-        //     .instances
-        //     .iter()
-        //     .map(Instance::to_raw)
-        //     .collect::<Vec<_>>();
-        // self.queue.write_buffer(
-        //     &self.instance_buffer,
-        //     0,
-        //     bytemuck::cast_slice(&instance_data),
-        // );
+        for instance in &mut self.instances {
+            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
+            let current = instance.rotation;
+            instance.rotation = amount * current;
+        }
+        let instance_data = self
+            .instances
+            .iter()
+            .map(Instance::to_raw)
+            .collect::<Vec<_>>();
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&instance_data),
+        );
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -826,20 +874,27 @@ impl State {
                 render_pass.draw_indexed(0..cb.num_elements, 0, 0..1);
             });
 
-            // render_pass.set_vertex_buffer(0, self.world.chunk_buffers[0].vertex_buffer.slice(..));
-            // render_pass.set_index_buffer(self.world.chunk_buffers[0].indices_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            // render_pass.draw_indexed(0..self.world.chunk_buffers[0].num_elements, 0, 0..1);
+            render_pass.set_pipeline(&self.model_rendering_pipeline);
+            
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            
+            for i in 0..self.obj_model.meshes.len() {
+                use model::DrawModel;
 
-            // let mesh = &self.obj_model.meshes[0];
-            // let material = &self.obj_model.materials[mesh.material];
+                let mesh = &self.obj_model.meshes[i];
+                let material = &self.obj_model.materials[mesh.material];
 
-            // use model::DrawModel;
-            // render_pass.draw_mesh_instanced(
-            //     mesh,
-            //     material,
-            //     0..self.instances.len() as u32,
-            //     &self.camera_bind_group,
-            // );
+                render_pass.draw_mesh_instanced(
+                    mesh,
+                    material,
+                    // 0..self.instances.len() as u32,
+                    0..1,
+                    &self.camera_bind_group,
+                );
+            }
         }
 
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
@@ -919,7 +974,7 @@ impl State {
                                                     // 0 is air
                                                     self.player.set_hotbar_slot(i + 1);
                                                 }
-                                                
+
                                                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                                                     rect,
                                                     gui::CustomBlockCallback { block_type: i },
