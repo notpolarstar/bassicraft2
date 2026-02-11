@@ -890,8 +890,8 @@ impl State {
                 render_pass.draw_mesh_instanced(
                     mesh,
                     material,
-                    // 0..self.instances.len() as u32,
-                    0..1,
+                    0..self.instances.len() as u32,
+                    // 0..1,
                     &self.camera_bind_group,
                 );
             }

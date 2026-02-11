@@ -85,8 +85,12 @@ impl World {
             );
 
             chunks[i].regenerate_mesh();
-            let mesh = chunks[i].mesh.clone();
-            let chunk_buffer = ChunkBuffer::new(device, mesh.vertices, mesh.indices, mesh.num_elements);
+            let chunk_buffer = ChunkBuffer::new(
+                device,
+                std::mem::take(&mut chunks[i].mesh.vertices),
+                std::mem::take(&mut chunks[i].mesh.indices),
+                chunks[i].mesh.num_elements,
+            );
             chunk_buffers.push(chunk_buffer);
         }
 
@@ -176,28 +180,28 @@ impl World {
             0 => {
                 for x in 0..CHUNK_X_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[x][y] = chunk.blocks[x][y][0].mat;
+                        blocks[x][y] = chunk.blocks.get(&(x, y, 0)).map(|b| b.mat).unwrap_or(0);
                     }
                 }
             }
             1 => {
                 for x in 0..CHUNK_X_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[x][y] = chunk.blocks[x][y][CHUNK_Z_SIZE - 1].mat;
+                        blocks[x][y] = chunk.blocks.get(&(x, y, CHUNK_Z_SIZE - 1)).map(|b| b.mat).unwrap_or(0);
                     }
                 }
             }
             2 => {
                 for z in 0..CHUNK_Z_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[z][y] = chunk.blocks[0][y][z].mat;
+                        blocks[z][y] = chunk.blocks.get(&(0, y, z)).map(|b| b.mat).unwrap_or(0);
                     }
                 }
             }
             3 => {
                 for z in 0..CHUNK_Z_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[z][y] = chunk.blocks[CHUNK_X_SIZE - 1][y][z].mat;
+                        blocks[z][y] = chunk.blocks.get(&(CHUNK_X_SIZE - 1, y, z)).map(|b| b.mat).unwrap_or(0);
                     }
                 }
             }
@@ -217,73 +221,70 @@ impl World {
         use crate::chunk::{CHUNK_X_SIZE, CHUNK_Y_SIZE, CHUNK_Z_SIZE};
         use crate::block::Block;
         
-        for x in 0..CHUNK_X_SIZE {
-            for y in 0..CHUNK_Y_SIZE {
-                for z in 0..CHUNK_Z_SIZE {
-                    let block_type = chunk.blocks[x][y][z].mat;
-                    if block_type == 0 {
-                        continue;
-                    }
-                    
-                    let mut close_blocks = [false; 6];
-                    
-                    // BACK (-z)
-                    close_blocks[0] = if z == 0 {
-                        back_blocks.as_ref()
-                            .and_then(|blocks| blocks.get(x).and_then(|col| col.get(y)))
-                            .map(|&b| Block::is_blocktype_solid(b))
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(chunk.blocks[x][y][z-1].mat)
-                    };
-                    
-                    // FRONT (+z)
-                    close_blocks[1] = if z == CHUNK_Z_SIZE - 1 {
-                        front_blocks.as_ref()
-                            .and_then(|blocks| blocks.get(x).and_then(|col| col.get(y)))
-                            .map(|&b| Block::is_blocktype_solid(b))
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(chunk.blocks[x][y][z+1].mat)
-                    };
-                    
-                    // LEFT (-x)
-                    close_blocks[2] = if x == 0 {
-                        left_blocks.as_ref()
-                            .and_then(|blocks| blocks.get(z).and_then(|col| col.get(y)))
-                            .map(|&b| Block::is_blocktype_solid(b))
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(chunk.blocks[x-1][y][z].mat)
-                    };
-                    
-                    // RIGHT (+x)
-                    close_blocks[3] = if x == CHUNK_X_SIZE - 1 {
-                        right_blocks.as_ref()
-                            .and_then(|blocks| blocks.get(z).and_then(|col| col.get(y)))
-                            .map(|&b| Block::is_blocktype_solid(b))
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(chunk.blocks[x+1][y][z].mat)
-                    };
-                    
-                    // TOP (+y)
-                    close_blocks[4] = if y == CHUNK_Y_SIZE - 1 {
-                        false
-                    } else {
-                        Block::is_blocktype_solid(chunk.blocks[x][y+1][z].mat)
-                    };
-                    
-                    // BOTTOM (-y)
-                    close_blocks[5] = if y == 0 {
-                        false
-                    } else {
-                        Block::is_blocktype_solid(chunk.blocks[x][y-1][z].mat)
-                    };
-                    
-                    chunk.blocks[x][y][z] = Block::new(block_type, close_blocks);
-                }
+        let keys: Vec<_> = chunk.blocks.keys().cloned().collect();
+        for (x, y, z) in keys {
+            let block_type = chunk.blocks.get(&(x, y, z)).map(|b| b.mat).unwrap_or(0);
+            if block_type == 0 {
+                continue;
             }
+            
+            let mut close_blocks = [false; 6];
+            
+            // BACK (-z)
+            close_blocks[0] = if z == 0 {
+                back_blocks.as_ref()
+                    .and_then(|blocks| blocks.get(x).and_then(|col| col.get(y)))
+                    .map(|&b| Block::is_blocktype_solid(b))
+                    .unwrap_or(false)
+            } else {
+                chunk.blocks.get(&(x, y, z-1)).map(|b| Block::is_blocktype_solid(b.mat)).unwrap_or(false)
+            };
+            
+            // FRONT (+z)
+            close_blocks[1] = if z == CHUNK_Z_SIZE - 1 {
+                front_blocks.as_ref()
+                    .and_then(|blocks| blocks.get(x).and_then(|col| col.get(y)))
+                    .map(|&b| Block::is_blocktype_solid(b))
+                    .unwrap_or(false)
+            } else {
+                chunk.blocks.get(&(x, y, z+1)).map(|b| Block::is_blocktype_solid(b.mat)).unwrap_or(false)
+            };
+            
+            // LEFT (-x)
+            close_blocks[2] = if x == 0 {
+                left_blocks.as_ref()
+                    .and_then(|blocks| blocks.get(z).and_then(|col| col.get(y)))
+                    .map(|&b| Block::is_blocktype_solid(b))
+                    .unwrap_or(false)
+            } else {
+                chunk.blocks.get(&(x-1, y, z)).map(|b| Block::is_blocktype_solid(b.mat)).unwrap_or(false)
+            };
+            
+            // RIGHT (+x)
+            close_blocks[3] = if x == CHUNK_X_SIZE - 1 {
+                right_blocks.as_ref()
+                    .and_then(|blocks| blocks.get(z).and_then(|col| col.get(y)))
+                    .map(|&b| Block::is_blocktype_solid(b))
+                    .unwrap_or(false)
+            } else {
+                chunk.blocks.get(&(x+1, y, z)).map(|b| Block::is_blocktype_solid(b.mat)).unwrap_or(false)
+            };
+            
+            // TOP (+y)
+            close_blocks[4] = if y == CHUNK_Y_SIZE - 1 {
+                false
+            } else {
+                chunk.blocks.get(&(x, y+1, z)).map(|b| Block::is_blocktype_solid(b.mat)).unwrap_or(false)
+            };
+            
+            // BOTTOM (-y)
+            close_blocks[5] = if y == 0 {
+                false
+            } else {
+                chunk.blocks.get(&(x, y-1, z)).map(|b| Block::is_blocktype_solid(b.mat)).unwrap_or(false)
+            };
+            
+            chunk.blocks.insert((x, y, z), Block::new(block_type, close_blocks));
         }
     }
     
@@ -309,12 +310,11 @@ impl World {
         );
 
         self.chunks[chunk_index].regenerate_mesh();
-        let mesh = self.chunks[chunk_index].mesh.clone();
         self.chunk_buffers[chunk_index] = ChunkBuffer::new(
             device,
-            mesh.vertices,
-            mesh.indices,
-            mesh.num_elements,
+            std::mem::take(&mut self.chunks[chunk_index].mesh.vertices),
+            std::mem::take(&mut self.chunks[chunk_index].mesh.indices),
+            self.chunks[chunk_index].mesh.num_elements,
         );
     }
 }
