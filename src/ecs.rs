@@ -81,6 +81,7 @@ pub struct Behaviour {
     pub movement_speed: f32,
     pub target_position: Option<Vector3<f32>>,
     pub path: VecDeque<Vector3<f32>>,
+    pub random_seed: f32,
 }
 
 impl Default for Behaviour {
@@ -91,6 +92,7 @@ impl Default for Behaviour {
             movement_speed: 2.0,
             target_position: None,
             path: VecDeque::new(),
+            random_seed: 0.0,
         }
     }
 }
@@ -296,17 +298,21 @@ impl EcsWorld {
                                 0.0,
                             );
 
-                            let check_very_close = transform.position + Vector3::new(normalized.x * 0.3, 0.0, normalized.z * 0.3);
-                            let check_close = transform.position + Vector3::new(normalized.x * 0.6, 0.0, normalized.z * 0.6);
-                            
-                            let obstacle_very_close = Self::is_block_solid_at(chunks, check_very_close);
-                            let obstacle_close = Self::is_block_solid_at(chunks, check_close);
+                            let check_near = transform.position + Vector3::new(normalized.x * 0.5, 0.0, normalized.z * 0.5);
+                            let check_mid = transform.position + Vector3::new(normalized.x * 1.0, 0.0, normalized.z * 1.0);
+                            let check_far = transform.position + Vector3::new(normalized.x * 1.5, 0.0, normalized.z * 1.5);
 
-                            if (obstacle_very_close || obstacle_close) && physics.on_ground {
-                                physics.velocity.y = 7.0;
+                            let obstacle_near = Self::is_block_solid_at(chunks, check_near) || 
+                                              Self::is_block_solid_at(chunks, check_near + Vector3::new(0.0, 1.0, 0.0));
+                            let obstacle_mid = Self::is_block_solid_at(chunks, check_mid) || 
+                                             Self::is_block_solid_at(chunks, check_mid + Vector3::new(0.0, 1.0, 0.0));
+                            let obstacle_far = Self::is_block_solid_at(chunks, check_far);
+
+                            if (obstacle_near || obstacle_mid || obstacle_far) && physics.on_ground {
+                                physics.velocity.y = 8.0;
                             }
 
-                            if obstacle_very_close {
+                            if obstacle_near {
                                 let perpendicular = Vector3::new(-normalized.z, 0.0, normalized.x);
                                 let left_path = transform.position + perpendicular * 1.0;
                                 let right_path = transform.position - perpendicular * 1.0;
@@ -353,14 +359,19 @@ impl EcsWorld {
                                 (new_yaw / 2.0).sin(),
                                 0.0,
                             );
+
+                            let check_near = transform.position + Vector3::new(normalized.x * 0.7, 0.0, normalized.z * 0.7);
+                            let check_mid = transform.position + Vector3::new(normalized.x * 1.2, 0.0, normalized.z * 1.2);
                             
-                            let check_ahead = transform.position + Vector3::new(normalized.x * 0.5, 0.0, normalized.z * 0.5);
+                            let obstacle_near = Self::is_block_solid_at(chunks, check_near) || 
+                                              Self::is_block_solid_at(chunks, check_near + Vector3::new(0.0, 1.0, 0.0));
+                            let obstacle_mid = Self::is_block_solid_at(chunks, check_mid);
                             
-                            if Self::is_block_solid_at(chunks, check_ahead) {
-                                if physics.on_ground {
-                                    physics.velocity.y = 7.0;
-                                }
-                                
+                            if (obstacle_near || obstacle_mid) && physics.on_ground {
+                                physics.velocity.y = 8.5;
+                            }
+                            
+                            if obstacle_near {
                                 let perpendicular = Vector3::new(-normalized.z, 0.0, normalized.x);
                                 let left_clear = !Self::is_block_solid_at(chunks, transform.position + perpendicular * 1.5);
                                 
@@ -380,15 +391,21 @@ impl EcsWorld {
                         }
                     }
                     BehaviourType::Wander => {
-                        if behaviour.target_position.is_none() || 
-                           (transform.position - behaviour.target_position.unwrap()).magnitude() < 2.0 {
+                        let is_stuck = physics.velocity.magnitude() < 0.1 && physics.on_ground;
+                        
+                        let reached_target = if let Some(target) = behaviour.target_position {
+                            (transform.position - target).magnitude() < 2.5
+                        } else {
+                            true
+                        };
 
+                        if behaviour.target_position.is_none() || reached_target || is_stuck {
                             let mut attempts = 0;
                             let mut valid_target = None;
-                            
-                            while attempts < 8 && valid_target.is_none() {
-                                let angle = ((transform.position.x * 12.9898 + transform.position.z * 78.233 + attempts as f32 * 43.1).sin() * 43758.5453).fract() * 2.0 * std::f32::consts::PI;
-                                let distance = 5.0 + ((transform.position.x * 43.9898 + attempts as f32 * 17.3).sin() * 23758.5453).fract() * 10.0;
+
+                            while attempts < 16 && valid_target.is_none() {
+                                let angle = ((behaviour.random_seed * 91.3 + transform.position.x * 12.9898 + transform.position.z * 78.233 + attempts as f32 * 43.1).sin() * 43758.5453).fract() * 2.0 * std::f32::consts::PI;
+                                let distance = 5.0 + ((behaviour.random_seed * 73.4 + transform.position.x * 43.9898 + attempts as f32 * 17.3).sin() * 23758.5453).fract() * 10.0;
                                 
                                 let offset = Vector3::new(
                                     angle.cos() * distance,
@@ -413,60 +430,54 @@ impl EcsWorld {
                                 }
                                 attempts += 1;
                             }
-                            
+
                             if let Some(target) = valid_target {
                                 behaviour.target_position = Some(target);
                             } else {
-                                behaviour.target_position = None;
+                                let fallback_angle = ((behaviour.random_seed * 123.4 + transform.position.x * 78.233 + transform.position.z * 127.1).sin() * 43758.5453).fract() * 2.0 * std::f32::consts::PI;
+                                let fallback_target = transform.position + Vector3::new(
+                                    fallback_angle.cos() * 8.0,
+                                    0.0,
+                                    fallback_angle.sin() * 8.0,
+                                );
+                                behaviour.target_position = Some(fallback_target);
                             }
                         }
-                        
+
                         if let Some(target) = behaviour.target_position {
                             let direction = target - transform.position;
-                            let distance = direction.magnitude();
+                            let normalized = direction.normalize();
+
+                            let target_yaw = (-normalized.x).atan2(-normalized.z);
+                            let current_yaw = 2.0 * transform.rotation.v.y.atan2(transform.rotation.s);
+                            let mut yaw_diff = target_yaw - current_yaw;
                             
-                            if distance > 1.0 {
-                                let normalized = direction.normalize();
+                            while yaw_diff > std::f32::consts::PI { yaw_diff -= 2.0 * std::f32::consts::PI; }
+                            while yaw_diff < -std::f32::consts::PI { yaw_diff += 2.0 * std::f32::consts::PI; }
 
-                                let target_yaw = (-normalized.x).atan2(-normalized.z);
-                                let current_yaw = 2.0 * transform.rotation.v.y.atan2(transform.rotation.s);
-                                let mut yaw_diff = target_yaw - current_yaw;
-                                
-                                while yaw_diff > std::f32::consts::PI { yaw_diff -= 2.0 * std::f32::consts::PI; }
-                                while yaw_diff < -std::f32::consts::PI { yaw_diff += 2.0 * std::f32::consts::PI; }
-                                
-                                let rotation_speed = 4.0 * dt;
-                                let yaw_change = yaw_diff.clamp(-rotation_speed, rotation_speed);
-                                let new_yaw = current_yaw + yaw_change;
-                                transform.rotation = Quaternion::new(
-                                    (new_yaw / 2.0).cos(),
-                                    0.0,
-                                    (new_yaw / 2.0).sin(),
-                                    0.0,
-                                );
-                                
-                                let check_ahead = transform.position + Vector3::new(normalized.x * 0.5, 0.0, normalized.z * 0.5);
-                                
-                                if Self::is_block_solid_at(chunks, check_ahead) {
-                                    if physics.on_ground {
-                                        physics.velocity.y = 7.0;
-                                    }
+                            let rotation_speed = 3.0 * dt;
+                            let yaw_change = yaw_diff.clamp(-rotation_speed, rotation_speed);
+                            let new_yaw = current_yaw + yaw_change;
+                            transform.rotation = Quaternion::new(
+                                (new_yaw / 2.0).cos(),
+                                0.0,
+                                (new_yaw / 2.0).sin(),
+                                0.0,
+                            );
 
-                                    let look_further = transform.position + normalized * 2.0;
-                                    if Self::is_block_solid_at(chunks, look_further) {
-                                        behaviour.target_position = None;
-                                    }
-                                }
-                                
-                                physics.velocity.x = normalized.x * behaviour.movement_speed;
-                                physics.velocity.z = normalized.z * behaviour.movement_speed;
-                            } else {
-                                physics.velocity.x *= 0.8;
-                                physics.velocity.z *= 0.8;
+                            physics.velocity.x = normalized.x * behaviour.movement_speed;
+                            physics.velocity.z = normalized.z * behaviour.movement_speed;
+
+                            let check_near = transform.position + Vector3::new(normalized.x * 0.8, 0.0, normalized.z * 0.8);
+                            let check_mid = transform.position + Vector3::new(normalized.x * 1.5, 0.0, normalized.z * 1.5);
+                            
+                            let obstacle_near = Self::is_block_solid_at(chunks, check_near) || 
+                                              Self::is_block_solid_at(chunks, check_near + Vector3::new(0.0, 1.0, 0.0));
+                            let obstacle_mid = Self::is_block_solid_at(chunks, check_mid);
+
+                            if (obstacle_near || obstacle_mid) && physics.on_ground {
+                                physics.velocity.y = 7.5;
                             }
-                        } else {
-                            physics.velocity.x *= 0.8;
-                            physics.velocity.z *= 0.8;
                         }
                     }
                 }
@@ -489,6 +500,7 @@ impl EcsWorld {
 }
 
 pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name: String) -> Entity {
+    let random_seed = ((position.x * 12.9898 + position.y * 78.233 + position.z * 45.164).sin() * 43758.5453).fract() * 1000.0;
     let mut entity = world.spawn_empty();
     entity.insert((
         Transform {
@@ -501,6 +513,7 @@ pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name
             behaviour_type: BehaviourType::FollowPlayer,
             movement_speed: 4.0,
             sight_range: 20.0,
+            random_seed,
             ..Default::default()
         },
         Health::default(),
@@ -517,6 +530,7 @@ pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name
 }
 
 pub fn spawn_wandering_mob(world: &mut World, position: Vector3<f32>, model_name: String) -> Entity {
+    let random_seed = ((position.x * 12.9898 + position.y * 78.233 + position.z * 45.164).sin() * 43758.5453).fract() * 1000.0;
     let mut entity = world.spawn_empty();
     entity.insert((
         Transform {
@@ -527,7 +541,8 @@ pub fn spawn_wandering_mob(world: &mut World, position: Vector3<f32>, model_name
         Collider::default(),
         Behaviour {
             behaviour_type: BehaviourType::Wander,
-            movement_speed: 3.0,
+            movement_speed: 2.0,
+            random_seed,
             ..Default::default()
         },
         Health::default(),
