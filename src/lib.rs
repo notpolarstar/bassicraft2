@@ -28,6 +28,8 @@ mod chunk;
 
 mod gui;
 
+mod ecs;
+
 // #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
     cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
@@ -127,6 +129,9 @@ const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
 
 const ROTATION_SPEED: f32 = (2.0 * std::f32::consts::PI / 60.0) / 100.0;
 
+//TEMP
+const INV_SIZE: u32 = 256;
+
 pub struct State {
     egui_renderer: gui::EguiRenderer,
     
@@ -164,12 +169,15 @@ pub struct State {
     depth_texture: texture::Texture,
 
     obj_model: model::Model,
+    loaded_models: std::collections::HashMap<String, model::Model>,
 
     world: world::World,
 
     mouse_pressed: bool,
 
     model_rendering_pipeline: wgpu::RenderPipeline,
+    
+    ecs_world: ecs::EcsWorld,
 }
 
 impl State {
@@ -444,6 +452,17 @@ impl State {
                 .await
                 .unwrap();
 
+        let mut loaded_models = std::collections::HashMap::new();
+        
+        // TEMP. LOAD MODELS DYNAMICALLY LATER !!!!!!!
+        if let Ok(cube_model) = resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout).await {
+            loaded_models.insert("cube.obj".to_string(), cube_model);
+        }
+        
+        if let Ok(steve_model) = resources::load_model("steve.obj", &device, &queue, &texture_bind_group_layout).await {
+            loaded_models.insert("steve.obj".to_string(), steve_model);
+        }
+
         let world = world::World::new(&device, &queue, 0x1f6c2);
 
         let mut egui_renderer = gui::EguiRenderer::new(
@@ -540,7 +559,7 @@ impl State {
 
         let mut block_meshes = Vec::new();
         
-        for block_type in 0..64 {
+        for block_type in 0..INV_SIZE {
             let tex_x = (block_type % 16) as f32 / 16.0;
             let tex_y = (block_type / 16) as f32 / 16.0;
             let tex_coords = [tex_x, tex_y, tex_x + 0.0625, tex_y + 0.0625];
@@ -637,6 +656,25 @@ impl State {
             block_meshes,
         );
 
+        let mut ecs_world = ecs::EcsWorld::new();
+
+        // test entities
+        for i in 0..5 {
+            ecs::spawn_wandering_mob(
+                &mut ecs_world.world,
+                cgmath::Vector3::new(5.0 + i as f32 * 2.0, 95.0, 5.0),
+                "steve.obj".to_string(),
+            );
+        }
+        
+        for i in 0..5 {
+            ecs::spawn_following_mob(
+                &mut ecs_world.world,
+                cgmath::Vector3::new(-5.0 - i as f32 * 2.0, 95.0, -5.0),
+                "cube.obj".to_string(),
+            );
+        }
+
         Ok(Self {
             egui_renderer,
             surface,
@@ -662,9 +700,11 @@ impl State {
             instance_buffer,
             depth_texture,
             obj_model,
+            loaded_models,
             world: world,
             mouse_pressed: false,
             model_rendering_pipeline,
+            ecs_world,
             // cursor_locked: false,
         })
     }
@@ -788,6 +828,8 @@ impl State {
     }
 
     fn update(&mut self, dt: instant::Duration) {
+        let dt_secs = dt.as_secs_f32().min(0.1);
+        
         // bad, use a staging buffer for the camera ?
         self.player.camera_controller.update_camera(&mut self.player.camera, dt);
         self.camera_uniform
@@ -797,6 +839,13 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+
+        let player_pos = cgmath::Vector3::new(
+            self.player.camera.position.x,
+            self.player.camera.position.y,
+            self.player.camera.position.z,
+        );
+        self.ecs_world.update(dt_secs, player_pos, &self.world.chunks);
 
         for instance in &mut self.instances {
             let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
@@ -833,6 +882,30 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
+
+        let entity_render_data = self.ecs_world.get_entities_render_data();
+        let mut entities_by_model: std::collections::HashMap<String, Vec<InstanceRaw>> = std::collections::HashMap::new();
+        
+        for (pos, rot, model_name) in entity_render_data {
+            let instance = Instance {
+                position: pos,
+                rotation: rot,
+            }.to_raw();
+            entities_by_model.entry(model_name).or_insert_with(Vec::new).push(instance);
+        }
+
+        let mut entity_buffers: std::collections::HashMap<String, (wgpu::Buffer, usize)> = std::collections::HashMap::new();
+        for (model_name, instances) in &entities_by_model {
+            if !instances.is_empty() {
+                use wgpu::util::DeviceExt;
+                let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Entity Instance Buffer: {}", model_name)),
+                    contents: bytemuck::cast_slice(instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                entity_buffers.insert(model_name.clone(), (buffer, instances.len()));
+            }
+        }
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -894,6 +967,44 @@ impl State {
                     // 0..1,
                     &self.camera_bind_group,
                 );
+            }
+
+            for (model_name, (buffer, instance_count)) in &entity_buffers {
+                render_pass.set_vertex_buffer(1, buffer.slice(..));
+
+                if let Some(model) = self.loaded_models.get(model_name) {
+                    for mesh in &model.meshes {
+                        let material = &model.materials[mesh.material];
+                        render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(
+                            mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        render_pass.set_bind_group(0, &material.bind_group, &[]);
+                        render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+                        render_pass.draw_indexed(
+                            0..mesh.num_elements,
+                            0,
+                            0..*instance_count as u32,
+                        );
+                    }
+                } else {
+                    for mesh in &self.obj_model.meshes {
+                        let material = &self.obj_model.materials[mesh.material];
+                        render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(
+                            mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        render_pass.set_bind_group(0, &material.bind_group, &[]);
+                        render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+                        render_pass.draw_indexed(
+                            0..mesh.num_elements,
+                            0,
+                            0..*instance_count as u32,
+                        );
+                    }
+                }
             }
         }
 
@@ -957,33 +1068,37 @@ impl State {
                         .collapsible(false)
                         .show(ctx, |ui| {
                             ui.add_space(5.0);
-                            egui::Grid::new("Inventory")
-                                .num_columns(8)
-                                .spacing([5.0, 5.0])
+                            egui::ScrollArea::vertical()
+                                .max_height(500.0)
                                 .show(ui, |ui| {
-                                    for i in 0..64 {
-                                        egui::Frame::canvas(ui.style())
-                                            .inner_margin(2.0)
-                                            .show(ui, |ui| {
-                                                let (rect, response) = ui.allocate_exact_size(
-                                                    egui::Vec2::splat(60.0), 
-                                                    egui::Sense::click()
-                                                );
-                                                
-                                                if response.clicked() {
-                                                    // 0 is air
-                                                    self.player.set_hotbar_slot(i + 1);
-                                                }
+                                    egui::Grid::new("Inventory")
+                                        .num_columns(8)
+                                        .spacing([5.0, 5.0])
+                                        .show(ui, |ui| {
+                                            for i in 0..INV_SIZE {
+                                                egui::Frame::canvas(ui.style())
+                                                    .inner_margin(2.0)
+                                                    .show(ui, |ui| {
+                                                        let (rect, response) = ui.allocate_exact_size(
+                                                            egui::Vec2::splat(60.0), 
+                                                            egui::Sense::click()
+                                                        );
+                                                        
+                                                        if response.clicked() {
+                                                            // 0 is air
+                                                            self.player.set_hotbar_slot(i + 1);
+                                                        }
 
-                                                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                                                    rect,
-                                                    gui::CustomBlockCallback { block_type: i },
-                                                ));
-                                            });
-                                        if (i + 1) % 8 == 0 {
-                                            ui.end_row();
-                                        }
-                                    }
+                                                        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                                                            rect,
+                                                            gui::CustomBlockCallback { block_type: i },
+                                                        ));
+                                                    });
+                                                if (i + 1) % 8 == 0 {
+                                                    ui.end_row();
+                                                }
+                                            }
+                                        });
                                 });
                         });
                 }
@@ -1093,7 +1208,7 @@ impl App {
 impl ApplicationHandler<State> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
-        let mut window_attributes = Window::default_attributes().with_maximized(true);
+        let mut window_attributes = Window::default_attributes().with_maximized(true).with_title("Bassicraft 2");
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -1216,9 +1331,9 @@ impl ApplicationHandler<State> for App {
                     state.handle_mouse_button(button, btn_state.is_pressed());
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                state.handle_mouse_scroll(&delta);
-            }
+            // WindowEvent::MouseWheel { delta, .. } => {
+            //     state.handle_mouse_scroll(&delta);
+            // }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {

@@ -26,6 +26,7 @@ eframe = { version = "0.33", features = ["wgpu"], default-features = false }
 egui-wgpu = "0.33"
 egui-winit = { version = "0.33", default-features = false }
 egui_extras = { version = "0.33.3", features = ["all_loaders", "image"] }
+bevy_ecs = "0.15"
 
 [dependencies.image]
 version = "0.24"
@@ -46,6 +47,7 @@ web-sys = { version = "0.3", features = [
 ]}
 reqwest = { version = "0.11" }
 instant = { version = "0.1", features = [ "wasm-bindgen" ] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [build-dependencies]
 anyhow = "1.0"
