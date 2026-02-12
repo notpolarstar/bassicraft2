@@ -663,7 +663,7 @@ impl State {
             ecs::spawn_wandering_mob(
                 &mut ecs_world.world,
                 cgmath::Vector3::new(5.0 + i as f32 * 2.0, 95.0, 5.0),
-                "steve.obj".to_string(),
+                "cube.obj".to_string(),
             );
         }
         
@@ -671,7 +671,7 @@ impl State {
             ecs::spawn_following_mob(
                 &mut ecs_world.world,
                 cgmath::Vector3::new(-5.0 - i as f32 * 2.0, 95.0, -5.0),
-                "cube.obj".to_string(),
+                "steve.obj".to_string(),
             );
         }
 
