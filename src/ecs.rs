@@ -125,6 +125,32 @@ pub enum EntityType {
     Projectile,
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Player;
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct PlayerInput {
+    pub forward: f32,
+    pub backward: f32,
+    pub left: f32,
+    pub right: f32,
+    pub jump: bool,
+    pub movement_speed: f32,
+}
+
+impl Default for PlayerInput {
+    fn default() -> Self {
+        Self {
+            forward: 0.0,
+            backward: 0.0,
+            left: 0.0,
+            right: 0.0,
+            jump: false,
+            movement_speed: 6.5,
+        }
+    }
+}
+
 pub fn health_system(
     mut commands: Commands,
     query: Query<(Entity, &Health)>,
@@ -211,7 +237,37 @@ impl EcsWorld {
         false
     }
     
-    pub fn update(&mut self, dt: f32, player_position: Vector3<f32>, chunks: &[crate::chunk::Chunk]) {
+    pub fn update(&mut self, dt: f32, chunks: &[crate::chunk::Chunk], camera_yaw: f32) {
+        {
+            let mut query = self.world.query::<(&Player, &PlayerInput, &mut Physics)>();
+            for (_player, input, mut physics) in query.iter_mut(&mut self.world) {
+                let forward = input.forward - input.backward;
+                let right = input.right - input.left;
+
+                let forward_dir = Vector3::new(camera_yaw.cos(), 0.0, camera_yaw.sin());
+                let right_dir = Vector3::new(-camera_yaw.sin(), 0.0, camera_yaw.cos());
+
+                let move_dir = forward_dir * forward + right_dir * right;
+                if move_dir.magnitude2() > 0.01 {
+                    let normalized = move_dir.normalize();
+                    physics.velocity.x = normalized.x * input.movement_speed;
+                    physics.velocity.z = normalized.z * input.movement_speed;
+                }
+
+                if input.jump && physics.on_ground {
+                    physics.velocity.y = 8.0;
+                }
+            }
+        }
+
+        let player_position = {
+            let mut query = self.world.query::<(&Player, &Transform)>();
+            query.iter(&self.world)
+                .next()
+                .map(|(_, t)| t.position)
+                .unwrap_or(Vector3::zero())
+        };
+        
         {
             let mut query = self.world.query::<(&mut Transform, &mut Physics, &Collider)>();
             for (mut transform, mut physics, collider) in query.iter_mut(&mut self.world) {
@@ -497,6 +553,24 @@ impl EcsWorld {
         
         entities
     }
+    
+    pub fn get_player_position(&mut self) -> Option<Vector3<f32>> {
+        let mut query = self.world.query::<(&Player, &Transform)>();
+        query.iter(&self.world)
+            .next()
+            .map(|(_, t)| t.position)
+    }
+    
+    pub fn update_player_input(&mut self, forward: f32, backward: f32, left: f32, right: f32, jump: bool) {
+        let mut query = self.world.query::<(&Player, &mut PlayerInput)>();
+        for (_player, mut input) in query.iter_mut(&mut self.world) {
+            input.forward = forward;
+            input.backward = backward;
+            input.left = left;
+            input.right = right;
+            input.jump = jump;
+        }
+    }
 }
 
 pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name: String) -> Entity {
@@ -553,6 +627,32 @@ pub fn spawn_wandering_mob(world: &mut World, position: Vector3<f32>, model_name
         EntityInfo {
             name: "wander",
             entity_type: EntityType::Mob,
+        },
+    ));
+    entity.id()
+}
+
+pub fn spawn_player(world: &mut World, position: Vector3<f32>) -> Entity {
+    let mut entity = world.spawn_empty();
+    entity.insert((
+        Player,
+        Transform {
+            position,
+            ..Default::default()
+        },
+        Physics {
+            friction: 0.8,
+            ..Default::default()
+        },
+        Collider {
+            width: 0.6,
+            height: 1.8,
+            depth: 0.6,
+        },
+        PlayerInput::default(),
+        Health {
+            current: 100.0,
+            max: 100.0,
         },
     ));
     entity.id()

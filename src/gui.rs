@@ -9,7 +9,6 @@ use egui_wgpu::wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView}
 use egui_wgpu::wgpu;
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::winit::window::Window;
-use wgpu::util::DeviceExt;
 
 pub struct EguiRenderer {
     pub context: Context,

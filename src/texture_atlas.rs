@@ -1,5 +1,3 @@
-use anyhow::*;
-
 use crate::{texture};
 
 const BLOCK_TEXTURE_SIZE: u8 = 16;

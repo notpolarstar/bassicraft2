@@ -658,6 +658,9 @@ impl State {
 
         let mut ecs_world = ecs::EcsWorld::new();
 
+        let player_start_pos = cgmath::Vector3::new(0.0, 100.0, 10.0);
+        ecs::spawn_player(&mut ecs_world.world, player_start_pos);
+
         // test entities
         for i in 0..5 {
             ecs::spawn_wandering_mob(
@@ -829,9 +832,29 @@ impl State {
 
     fn update(&mut self, dt: instant::Duration) {
         let dt_secs = dt.as_secs_f32().min(0.1);
-        
-        // bad, use a staging buffer for the camera ?
+
         self.player.camera_controller.update_camera(&mut self.player.camera, dt);
+
+        self.ecs_world.update_player_input(
+            self.player.camera_controller.amount_forward,
+            self.player.camera_controller.amount_backward,
+            self.player.camera_controller.amount_left,
+            self.player.camera_controller.amount_right,
+            self.player.camera_controller.amount_up > 0.0, // jump
+        );
+
+        let camera_yaw = self.player.camera.yaw().0;
+
+        self.ecs_world.update(dt_secs, &self.world.chunks, camera_yaw);
+
+        if let Some(player_pos) = self.ecs_world.get_player_position() {
+            self.player.camera.position = cgmath::Point3::new(
+                player_pos.x,
+                player_pos.y + 1.6, // camera at eye level
+                player_pos.z,
+            );
+        }
+
         self.camera_uniform
             .update_view_proj(&self.player.camera, &self.player.projection);
         self.queue.write_buffer(
@@ -839,13 +862,6 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
-
-        let player_pos = cgmath::Vector3::new(
-            self.player.camera.position.x,
-            self.player.camera.position.y,
-            self.player.camera.position.z,
-        );
-        self.ecs_world.update(dt_secs, player_pos, &self.world.chunks);
 
         for instance in &mut self.instances {
             let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
