@@ -56,5 +56,4 @@ fs_extra = "1.2"
 glob = "0.3"
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
-# wasm-opt = ["-O", "--enable-bulk-memory", "--enable-mutable-globals"]
+wasm-opt = ["--all-features", "-O4", "--gufa", "-O4", "-Os"]
