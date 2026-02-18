@@ -27,6 +27,7 @@ egui-wgpu = "0.33"
 egui-winit = { version = "0.33", default-features = false }
 egui_extras = { version = "0.33.3", features = ["all_loaders", "image"] }
 bevy_ecs = "0.15"
+getrandom = "0.3"
 
 [dependencies.image]
 version = "0.24"

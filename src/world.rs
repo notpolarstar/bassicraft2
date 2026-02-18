@@ -104,10 +104,13 @@ impl World {
         }
     }
 
-    pub fn break_block(&mut self, device: &wgpu::Device, pos: [i32; 3]) {
+    pub fn break_block(&mut self, device: &wgpu::Device, pos: [i32; 3]) -> Option<u32> {
         if let Some((chunk_index, _)) = self.chunks.iter_mut().enumerate().find(|(_, c)| c.contains_block(pos)) {
             let chunk_pos = self.chunks[chunk_index].pos;
             let local_pos = self.chunks[chunk_index].get_local_pos(pos);
+            
+            let block_type = self.chunks[chunk_index].blocks.get(&(local_pos[0] as usize, local_pos[1] as usize, local_pos[2] as usize))
+                .map(|b| b.mat);
             
             self.chunks[chunk_index].break_block(pos);
             self.update_chunk_mesh(device, chunk_index);
@@ -132,6 +135,10 @@ impl World {
                     self.update_chunk_mesh(device, idx);
                 }
             }
+            
+            block_type
+        } else {
+            None
         }
     }
 

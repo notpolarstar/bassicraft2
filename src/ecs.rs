@@ -2,6 +2,8 @@ use bevy_ecs::prelude::*;
 use cgmath::{Vector3, Quaternion, InnerSpace, Zero};
 use std::collections::VecDeque;
 
+use crate::random;
+
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Transform {
     pub position: Vector3<f32>,
@@ -151,6 +153,23 @@ impl Default for PlayerInput {
     }
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Particle {
+    pub block_type: u32,
+    pub lifetime: f32,
+    pub max_lifetime: f32,
+}
+
+impl Default for Particle {
+    fn default() -> Self {
+        Self {
+            block_type: 0,
+            lifetime: 0.0,
+            max_lifetime: 1.0,
+        }
+    }
+}
+
 pub fn health_system(
     mut commands: Commands,
     query: Query<(Entity, &Health)>,
@@ -162,6 +181,35 @@ pub fn health_system(
     }
 }
 
+pub fn particle_lifetime_system(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Particle)>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_seconds();
+    for (entity, mut particle) in query.iter_mut() {
+        particle.lifetime += dt;
+        if particle.lifetime >= particle.max_lifetime {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct Time {
+    delta: f32,
+}
+
+impl Time {
+    pub fn delta_seconds(&self) -> f32 {
+        self.delta
+    }
+
+    pub fn update(&mut self, delta: f32) {
+        self.delta = delta;
+    }
+}
+
 pub struct EcsWorld {
     pub world: World,
     pub schedule: Schedule,
@@ -169,10 +217,12 @@ pub struct EcsWorld {
 
 impl EcsWorld {
     pub fn new() -> Self {
-        let world = World::new();
+        let mut world = World::new();
+        world.insert_resource(Time::default());
+        
         let mut schedule = Schedule::default();
 
-        schedule.add_systems(health_system);
+        schedule.add_systems((health_system, particle_lifetime_system));
         
         Self { world, schedule }
     }
@@ -238,6 +288,10 @@ impl EcsWorld {
     }
     
     pub fn update(&mut self, dt: f32, chunks: &[crate::chunk::Chunk], camera_yaw: f32) {
+        if let Some(mut time) = self.world.get_resource_mut::<Time>() {
+            time.update(dt);
+        }
+        
         {
             let mut query = self.world.query::<(&Player, &PlayerInput, &mut Physics)>();
             for (_player, input, mut physics) in query.iter_mut(&mut self.world) {
@@ -554,6 +608,18 @@ impl EcsWorld {
         entities
     }
     
+    pub fn get_particles_render_data(&mut self) -> Vec<(Vector3<f32>, u32, f32)> {
+        let mut particles = Vec::new();
+        let mut query = self.world.query::<(&Transform, &Particle)>();
+        
+        for (transform, particle) in query.iter(&self.world) {
+            let alpha = 1.0 - (particle.lifetime / particle.max_lifetime);
+            particles.push((transform.position, particle.block_type, alpha));
+        }
+        
+        particles
+    }
+    
     pub fn get_player_position(&mut self) -> Option<Vector3<f32>> {
         let mut query = self.world.query::<(&Player, &Transform)>();
         query.iter(&self.world)
@@ -574,7 +640,7 @@ impl EcsWorld {
 }
 
 pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name: String) -> Entity {
-    let random_seed = ((position.x * 12.9898 + position.y * 78.233 + position.z * 45.164).sin() * 43758.5453).fract() * 1000.0;
+    let random_seed = random::get_random_f32().unwrap();
     let mut entity = world.spawn_empty();
     entity.insert((
         Transform {
@@ -604,7 +670,7 @@ pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name
 }
 
 pub fn spawn_wandering_mob(world: &mut World, position: Vector3<f32>, model_name: String) -> Entity {
-    let random_seed = ((position.x * 12.9898 + position.y * 78.233 + position.z * 45.164).sin() * 43758.5453).fract() * 1000.0;
+    let random_seed = random::get_random_f32().unwrap();
     let mut entity = world.spawn_empty();
     entity.insert((
         Transform {
@@ -653,6 +719,36 @@ pub fn spawn_player(world: &mut World, position: Vector3<f32>) -> Entity {
         Health {
             current: 100.0,
             max: 100.0,
+        },
+    ));
+    entity.id()
+}
+
+pub fn spawn_particle(world: &mut World, position: Vector3<f32>, block_type: u32, velocity: Vector3<f32>) -> Entity {
+    let random_factor = ((position.x * 12.9898 + position.y * 78.233 + position.z * 45.164).sin() * 43758.5453).fract();
+    
+    let mut entity = world.spawn_empty();
+    entity.insert((
+        Transform {
+            position,
+            scale: Vector3::new(0.15, 0.15, 0.15),
+            ..Default::default()
+        },
+        Physics {
+            velocity,
+            gravity_enabled: true,
+            friction: 0.98,
+            ..Default::default()
+        },
+        Collider {
+            width: 0.15,
+            height: 0.15,
+            depth: 0.15,
+        },
+        Particle {
+            block_type,
+            lifetime: 0.0,
+            max_lifetime: 0.8 + random_factor * 0.4,
         },
     ));
     entity.id()

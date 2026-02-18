@@ -15,6 +15,8 @@ use wasm_bindgen::prelude::*;
 
 use model::Vertex;
 
+mod random;
+
 mod camera;
 mod player;
 mod model;
@@ -29,6 +31,8 @@ mod chunk;
 mod gui;
 
 mod ecs;
+
+mod particles;
 
 // #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
@@ -178,6 +182,8 @@ pub struct State {
     model_rendering_pipeline: wgpu::RenderPipeline,
     
     ecs_world: ecs::EcsWorld,
+
+    particle_rendering_pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
@@ -298,6 +304,7 @@ impl State {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
         let model_shader = device.create_shader_module(wgpu::include_wgsl!("model_shader.wgsl"));
+        let particle_shader = device.create_shader_module(wgpu::include_wgsl!("particle_shader.wgsl"));
 
         // let camera = Camera {
         //     eye: (0.0, 1.0, 2.0).into(),
@@ -555,6 +562,50 @@ impl State {
             cache: None,
         });
 
+        let particle_rendering_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Particle Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &particle_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[particles::ParticleVertex::desc(), InstanceRaw::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &particle_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
         use crate::block::BlockVertex;
 
         let mut block_meshes = Vec::new();
@@ -708,6 +759,7 @@ impl State {
             mouse_pressed: false,
             model_rendering_pipeline,
             ecs_world,
+            particle_rendering_pipeline,
             // cursor_locked: false,
         })
     }
@@ -764,7 +816,36 @@ impl State {
                     }
 
                     if let Some(pos) = self.player.get_block_pointed_at(&self.world.chunks) {
-                        self.world.break_block(&self.device, pos);
+                        if let Some(block_type) = self.world.break_block(&self.device, pos) {
+                            if block_type != 0 {
+                                for i in 0..8 {
+                                    let random1 = random::get_random_f32_normalized().unwrap();
+                                    let random2 = random::get_random_f32_normalized().unwrap();
+                                    let random3 = random::get_random_f32_normalized().unwrap();
+                                    let random4 = random::get_random_f32_normalized().unwrap();
+                                    let random5 = random::get_random_f32_normalized().unwrap();
+                                    let random6 = random::get_random_f32_normalized().unwrap();
+                                    
+                                    let offset_x = random1 * 0.6 - 0.3;
+                                    let offset_y = random2 * 0.6 - 0.3;
+                                    let offset_z = random3 * 0.6 - 0.3;
+                                    
+                                    let particle_pos = cgmath::Vector3::new(
+                                        pos[0] as f32 + 0.5 + offset_x,
+                                        pos[1] as f32 + 0.5 + offset_y,
+                                        pos[2] as f32 + 0.5 + offset_z,
+                                    );
+                                    
+                                    let velocity = cgmath::Vector3::new(
+                                        random4 * 4.0 - 2.0,
+                                        random5 * 3.0 + 2.0,
+                                        random6 * 4.0 - 2.0,
+                                    );
+                                    
+                                    ecs::spawn_particle(&mut self.ecs_world.world, particle_pos, block_type - 1, velocity);
+                                }
+                            }
+                        }
                     }
 
                 }
@@ -1020,6 +1101,69 @@ impl State {
                             0..*instance_count as u32,
                         );
                     }
+                }
+            }
+
+            let particle_render_data = self.ecs_world.get_particles_render_data();
+            if !particle_render_data.is_empty() {
+                use particles::ParticleVertex;
+
+                let mut particles_by_type: std::collections::HashMap<u32, Vec<cgmath::Vector3<f32>>> = std::collections::HashMap::new();
+                for (pos, block_type, _alpha) in &particle_render_data {
+                    particles_by_type.entry(*block_type).or_insert_with(Vec::new).push(*pos);
+                }
+
+                for (block_type, positions) in particles_by_type {
+                    if positions.is_empty() {
+                        continue;
+                    }
+
+                    let tex_x = ((block_type % 16) as f32) / 16.0;
+                    let tex_y = ((block_type / 16) as f32) / 16.0;
+                    let tex_size = 1.0 / 16.0;
+
+                    let particle_vertices = vec![
+                        ParticleVertex { position: [-0.5, -0.5,  0.0], tex_coords: [tex_x, tex_y + tex_size] },
+                        ParticleVertex { position: [ 0.5, -0.5,  0.0], tex_coords: [tex_x + tex_size, tex_y + tex_size] },
+                        ParticleVertex { position: [ 0.5,  0.5,  0.0], tex_coords: [tex_x + tex_size, tex_y] },
+                        ParticleVertex { position: [-0.5,  0.5,  0.0], tex_coords: [tex_x, tex_y] },
+                    ];
+
+                    let particle_indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
+
+                    let particle_instances: Vec<InstanceRaw> = positions.iter().map(|pos| {
+                        Instance {
+                            position: *pos,
+                            rotation: cgmath::Quaternion::new(1.0, 0.0, 0.0, 0.0),
+                        }.to_raw()
+                    }).collect();
+
+                    use wgpu::util::DeviceExt;
+                    let particle_vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Particle Vertex Buffer"),
+                        contents: bytemuck::cast_slice(&particle_vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+
+                    let particle_index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Particle Index Buffer"),
+                        contents: bytemuck::cast_slice(&particle_indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+
+                    let particle_instance_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Particle Instance Buffer"),
+                        contents: bytemuck::cast_slice(&particle_instances),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+
+                    render_pass.set_pipeline(&self.particle_rendering_pipeline);
+                    render_pass.set_vertex_buffer(0, particle_vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, particle_instance_buffer.slice(..));
+                    render_pass.set_index_buffer(particle_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.set_bind_group(0, &self.world.texture_atlas.diffuse_bind_group, &[]);
+                    render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+                    render_pass.draw_indexed(0..6, 0, 0..particle_instances.len() as u32);
                 }
             }
         }
