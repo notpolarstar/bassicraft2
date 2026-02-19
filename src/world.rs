@@ -13,10 +13,15 @@ pub struct ChunkBuffer {
     pub vertex_buffer: wgpu::Buffer,
     pub indices_buffer: wgpu::Buffer,
     pub num_elements: u32,
+    vertex_capacity: usize,
+    index_capacity: usize,
 }
 
 impl ChunkBuffer {
     pub fn new(device: &wgpu::Device, vertices: Vec<BlockVertex>, indices: Vec<u32>, num_elements: u32) -> Self {
+        let vertex_capacity = vertices.len();
+        let index_capacity = indices.len();
+        
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("chunkbuffer vertex buffer"),
             contents: bytemuck::cast_slice(&vertices),
@@ -30,10 +35,47 @@ impl ChunkBuffer {
         });
 
         Self {
-            vertex_buffer: vertex_buffer,
-            indices_buffer: indices_buffer,
-            num_elements: num_elements,
+            vertex_buffer,
+            indices_buffer,
+            num_elements,
+            vertex_capacity,
+            index_capacity,
         }
+    }
+    
+    pub fn update_or_recreate(
+        &mut self, 
+        device: &wgpu::Device, 
+        queue: &wgpu::Queue,
+        vertices: Vec<BlockVertex>, 
+        indices: Vec<u32>, 
+        num_elements: u32
+    ) {
+        if vertices.len() > self.vertex_capacity || indices.len() > self.index_capacity {
+            self.vertex_capacity = (vertices.len() as f32 * 1.5) as usize;
+            self.index_capacity = (indices.len() as f32 * 1.5) as usize;
+            
+            let vertex_buffer_size = (self.vertex_capacity * std::mem::size_of::<BlockVertex>()) as u64;
+            let index_buffer_size = (self.index_capacity * std::mem::size_of::<u32>()) as u64;
+            
+            self.vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("chunkbuffer vertex buffer"),
+                size: vertex_buffer_size,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            
+            self.indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("chunkbuffer indices buffer"),
+                size: index_buffer_size,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+        queue.write_buffer(&self.indices_buffer, 0, bytemuck::cast_slice(&indices));
+        self.num_elements = num_elements;
     }
 }
 
@@ -104,7 +146,7 @@ impl World {
         }
     }
 
-    pub fn break_block(&mut self, device: &wgpu::Device, pos: [i32; 3]) -> Option<u32> {
+    pub fn break_block(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pos: [i32; 3]) -> Option<u32> {
         if let Some((chunk_index, _)) = self.chunks.iter_mut().enumerate().find(|(_, c)| c.contains_block(pos)) {
             let chunk_pos = self.chunks[chunk_index].pos;
             let local_pos = self.chunks[chunk_index].get_local_pos(pos);
@@ -113,26 +155,26 @@ impl World {
                 .map(|b| b.mat);
             
             self.chunks[chunk_index].break_block(pos);
-            self.update_chunk_mesh(device, chunk_index);
+            self.update_chunk_mesh(device, queue, chunk_index);
 
             if local_pos[0] == 0 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0] - 1, chunk_pos[1]]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
             if local_pos[0] == 15 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0] + 1, chunk_pos[1]]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
             if local_pos[2] == 0 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0], chunk_pos[1] - 1]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
             if local_pos[2] == 15 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0], chunk_pos[1] + 1]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
             
@@ -142,32 +184,32 @@ impl World {
         }
     }
 
-    pub fn place_block(&mut self, device: &wgpu::Device, pos: [i32; 3], selected_block: u32) {
+    pub fn place_block(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pos: [i32; 3], selected_block: u32) {
         if let Some((chunk_index, _)) = self.chunks.iter_mut().enumerate().find(|(_, c)| c.contains_position(pos)) {
             let chunk_pos = self.chunks[chunk_index].pos;
             let local_pos = self.chunks[chunk_index].get_local_pos(pos);
             
             self.chunks[chunk_index].place_block(pos, selected_block);
-            self.update_chunk_mesh(device, chunk_index);
+            self.update_chunk_mesh(device, queue, chunk_index);
 
             if local_pos[0] == 0 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0] - 1, chunk_pos[1]]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
             if local_pos[0] == 15 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0] + 1, chunk_pos[1]]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
             if local_pos[2] == 0 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0], chunk_pos[1] - 1]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
             if local_pos[2] == 15 {
                 if let Some(idx) = self.find_chunk([chunk_pos[0], chunk_pos[1] + 1]) {
-                    self.update_chunk_mesh(device, idx);
+                    self.update_chunk_mesh(device, queue, idx);
                 }
             }
         }
@@ -295,7 +337,7 @@ impl World {
         }
     }
     
-    fn update_chunk_mesh(&mut self, device: &wgpu::Device, chunk_index: usize) {
+    fn update_chunk_mesh(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, chunk_index: usize) {
         let pos = self.chunks[chunk_index].pos;
 
         let left_idx = self.chunks.iter().position(|c| c.pos == [pos[0] - 1, pos[1]]);
@@ -317,8 +359,9 @@ impl World {
         );
 
         self.chunks[chunk_index].regenerate_mesh();
-        self.chunk_buffers[chunk_index] = ChunkBuffer::new(
+        self.chunk_buffers[chunk_index].update_or_recreate(
             device,
+            queue,
             std::mem::take(&mut self.chunks[chunk_index].mesh.vertices),
             std::mem::take(&mut self.chunks[chunk_index].mesh.indices),
             self.chunks[chunk_index].mesh.num_elements,

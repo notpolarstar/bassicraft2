@@ -184,6 +184,11 @@ pub struct State {
     ecs_world: ecs::EcsWorld,
 
     particle_rendering_pipeline: wgpu::RenderPipeline,
+
+    particle_vertex_buffers: std::collections::HashMap<u32, wgpu::Buffer>,
+    particle_index_buffer: wgpu::Buffer,
+    particle_instance_buffer: wgpu::Buffer,
+    particle_instance_capacity: usize,
 }
 
 impl State {
@@ -606,6 +611,47 @@ impl State {
             cache: None,
         });
 
+        const MAX_PARTICLES: usize = 1000;
+        
+        use particles::ParticleVertex;
+        
+        let particle_indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
+        let particle_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Particle Index Buffer Pool"),
+            contents: bytemuck::cast_slice(&particle_indices),
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        });
+        
+        let particle_instance_buffer_size = (MAX_PARTICLES * std::mem::size_of::<InstanceRaw>()) as u64;
+        let particle_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Particle Instance Buffer Pool"),
+            size: particle_instance_buffer_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut particle_vertex_buffers = std::collections::HashMap::new();
+        for block_type in 0..INV_SIZE {
+            let tex_x = ((block_type % 16) as f32) / 16.0;
+            let tex_y = ((block_type / 16) as f32) / 16.0;
+            let tex_size = 1.0 / 16.0;
+            
+            let particle_vertices = vec![
+                ParticleVertex { position: [-0.5, -0.5,  0.0], tex_coords: [tex_x, tex_y + tex_size] },
+                ParticleVertex { position: [ 0.5, -0.5,  0.0], tex_coords: [tex_x + tex_size, tex_y + tex_size] },
+                ParticleVertex { position: [ 0.5,  0.5,  0.0], tex_coords: [tex_x + tex_size, tex_y] },
+                ParticleVertex { position: [-0.5,  0.5,  0.0], tex_coords: [tex_x, tex_y] },
+            ];
+            
+            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Particle Vertex Buffer {}", block_type)),
+                contents: bytemuck::cast_slice(&particle_vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            
+            particle_vertex_buffers.insert(block_type, vertex_buffer);
+        }
+
         use crate::block::BlockVertex;
 
         let mut block_meshes = Vec::new();
@@ -760,6 +806,10 @@ impl State {
             model_rendering_pipeline,
             ecs_world,
             particle_rendering_pipeline,
+            particle_vertex_buffers,
+            particle_index_buffer,
+            particle_instance_buffer,
+            particle_instance_capacity: MAX_PARTICLES,
             // cursor_locked: false,
         })
     }
@@ -816,9 +866,9 @@ impl State {
                     }
 
                     if let Some(pos) = self.player.get_block_pointed_at(&self.world.chunks) {
-                        if let Some(block_type) = self.world.break_block(&self.device, pos) {
+                        if let Some(block_type) = self.world.break_block(&self.device, &self.queue, pos) {
                             if block_type != 0 {
-                                for i in 0..8 {
+                                for _ in 0..8 {
                                     let random1 = random::get_random_f32_normalized().unwrap();
                                     let random2 = random::get_random_f32_normalized().unwrap();
                                     let random3 = random::get_random_f32_normalized().unwrap();
@@ -858,7 +908,7 @@ impl State {
                     // }
                     
                     if let Some(pos) = self.player.get_block_placement_pos(&self.world.chunks) {
-                        self.world.place_block(&self.device, pos, self.player.selected_block);
+                        self.world.place_block(&self.device, &self.queue, pos, self.player.selected_block);
                     }
                 }
             }
@@ -1106,64 +1156,58 @@ impl State {
 
             let particle_render_data = self.ecs_world.get_particles_render_data();
             if !particle_render_data.is_empty() {
-                use particles::ParticleVertex;
-
                 let mut particles_by_type: std::collections::HashMap<u32, Vec<cgmath::Vector3<f32>>> = std::collections::HashMap::new();
                 for (pos, block_type, _alpha) in &particle_render_data {
                     particles_by_type.entry(*block_type).or_insert_with(Vec::new).push(*pos);
                 }
 
-                for (block_type, positions) in particles_by_type {
+                let mut all_instances: Vec<InstanceRaw> = Vec::new();
+                let mut draw_ranges: Vec<(u32, u32, u32)> = Vec::new();
+
+                for (block_type, positions) in &particles_by_type {
                     if positions.is_empty() {
                         continue;
                     }
-
-                    let tex_x = ((block_type % 16) as f32) / 16.0;
-                    let tex_y = ((block_type / 16) as f32) / 16.0;
-                    let tex_size = 1.0 / 16.0;
-
-                    let particle_vertices = vec![
-                        ParticleVertex { position: [-0.5, -0.5,  0.0], tex_coords: [tex_x, tex_y + tex_size] },
-                        ParticleVertex { position: [ 0.5, -0.5,  0.0], tex_coords: [tex_x + tex_size, tex_y + tex_size] },
-                        ParticleVertex { position: [ 0.5,  0.5,  0.0], tex_coords: [tex_x + tex_size, tex_y] },
-                        ParticleVertex { position: [-0.5,  0.5,  0.0], tex_coords: [tex_x, tex_y] },
-                    ];
-
-                    let particle_indices: Vec<u32> = vec![0, 1, 2, 0, 2, 3];
-
-                    let particle_instances: Vec<InstanceRaw> = positions.iter().map(|pos| {
-                        Instance {
+                    let start = all_instances.len() as u32;
+                    for pos in positions {
+                        all_instances.push(Instance {
                             position: *pos,
                             rotation: cgmath::Quaternion::new(1.0, 0.0, 0.0, 0.0),
-                        }.to_raw()
-                    }).collect();
+                        }.to_raw());
+                    }
+                    draw_ranges.push((*block_type, start, positions.len() as u32));
+                }
 
-                    use wgpu::util::DeviceExt;
-                    let particle_vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Particle Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&particle_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                if !all_instances.is_empty() {
+                    if all_instances.len() > self.particle_instance_capacity {
+                        self.particle_instance_capacity = (all_instances.len() as f32 * 1.5) as usize;
+                        let new_size = (self.particle_instance_capacity * std::mem::size_of::<InstanceRaw>()) as u64;
+                        self.particle_instance_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("Particle Instance Buffer Pool"),
+                            size: new_size,
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        });
+                    }
 
-                    let particle_index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Particle Index Buffer"),
-                        contents: bytemuck::cast_slice(&particle_indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                    self.queue.write_buffer(&self.particle_instance_buffer, 0, bytemuck::cast_slice(&all_instances));
 
-                    let particle_instance_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Particle Instance Buffer"),
-                        contents: bytemuck::cast_slice(&particle_instances),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+                    let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
 
                     render_pass.set_pipeline(&self.particle_rendering_pipeline);
-                    render_pass.set_vertex_buffer(0, particle_vertex_buffer.slice(..));
-                    render_pass.set_vertex_buffer(1, particle_instance_buffer.slice(..));
-                    render_pass.set_index_buffer(particle_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.set_index_buffer(self.particle_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.set_bind_group(0, &self.world.texture_atlas.diffuse_bind_group, &[]);
                     render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-                    render_pass.draw_indexed(0..6, 0, 0..particle_instances.len() as u32);
+
+                    for (block_type, start, count) in draw_ranges {
+                        if let Some(vertex_buffer) = self.particle_vertex_buffers.get(&block_type) {
+                            let byte_start = start as u64 * instance_size;
+                            let byte_end = byte_start + count as u64 * instance_size;
+                            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                            render_pass.set_vertex_buffer(1, self.particle_instance_buffer.slice(byte_start..byte_end));
+                            render_pass.draw_indexed(0..6, 0, 0..count);
+                        }
+                    }
                 }
             }
         }
