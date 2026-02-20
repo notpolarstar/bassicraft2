@@ -229,3 +229,143 @@ impl BlockRenderResources {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MultiplayerAction {
+    None,
+    Host { port: u16 },
+    Join { url: String },
+    Disconnect,
+    RequestChunks,
+}
+
+pub struct MultiplayerPanel {
+    pub join_address:  String,
+    pub host_port:     String,
+    pub status:        String,
+    pub is_connected:  bool,
+    pub is_hosting:    bool,
+    pub lan_address:   Option<String>,
+    pub chat_input:    String,
+    pub chat_log:      Vec<(u32, String)>,
+    pub my_id:         Option<u32>,
+}
+
+impl Default for MultiplayerPanel {
+    fn default() -> Self {
+        Self {
+            join_address: "ws://127.0.0.1:7777".to_string(),
+            host_port:    "7777".to_string(),
+            status:       "Not connected".to_string(),
+            is_connected: false,
+            is_hosting:   false,
+            lan_address:  None,
+            chat_input:   String::new(),
+            chat_log:     Vec::new(),
+            my_id:        None,
+        }
+    }
+}
+
+impl MultiplayerPanel {
+    pub fn draw(&mut self, ctx: &egui::Context) -> MultiplayerAction {
+        let mut action = MultiplayerAction::None;
+
+        egui::Window::new("Multiplayer")
+            .default_pos([10.0, 200.0])
+            .default_width(300.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let dot_color = if self.is_connected {
+                        egui::Color32::GREEN
+                    } else {
+                        egui::Color32::RED
+                    };
+                    ui.colored_label(dot_color, "*");
+                    ui.label(&self.status);
+                });
+
+                if let Some(ref addr) = self.lan_address {
+                    ui.horizontal(|ui| {
+                        ui.label("LAN address:");
+                        ui.monospace(addr);
+                        if ui.small_button("Copy").clicked() {
+                            ui.ctx().copy_text(addr.clone());
+                        }
+                    });
+                }
+
+                ui.separator();
+
+                if self.is_connected {
+                    if ui.button("Disconnect").clicked() {
+                        action = MultiplayerAction::Disconnect;
+                    }
+
+                    ui.separator();
+                    ui.label("Chat:");
+                    egui::ScrollArea::vertical()
+                        .id_salt("chat_scroll")
+                        .max_height(120.0)
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            for (sender_id, msg) in &self.chat_log {
+                                ui.label(format!("[{}] {}", sender_id, msg));
+                            }
+                        });
+
+                    ui.horizontal(|ui| {
+                        let text_edit = ui.text_edit_singleline(&mut self.chat_input);
+                        let send_pressed = ui.button("Send").clicked()
+                            || (text_edit.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                        if send_pressed && !self.chat_input.is_empty() {
+                            action = MultiplayerAction::RequestChunks;
+                        }
+                    });
+                } else {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        ui.collapsing("Host a LAN game", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Port:");
+                                ui.text_edit_singleline(&mut self.host_port);
+                            });
+                            if ui.button("Start hosting").clicked() {
+                                if let Ok(port) = self.host_port.parse::<u16>() {
+                                    action = MultiplayerAction::Host { port };
+                                } else {
+                                    self.status = "Invalid port".to_string();
+                                }
+                            }
+                        });
+
+                        ui.separator();
+                    }
+
+                    ui.label("Join a game:");
+                    ui.text_edit_singleline(&mut self.join_address);
+                    if ui.button("Connect").clicked() {
+                        action = MultiplayerAction::Join {
+                            url: self.join_address.clone(),
+                        };
+                    }
+                }
+            });
+
+        action
+    }
+
+    pub fn on_connected(&mut self, my_id: u32) {
+        self.is_connected = true;
+        self.my_id        = Some(my_id);
+        self.status       = format!("Connected (ID {})", my_id);
+    }
+
+    pub fn push_chat(&mut self, sender_id: u32, message: String) {
+        if self.chat_log.len() >= 200 {
+            self.chat_log.remove(0);
+        }
+        self.chat_log.push((sender_id, message));
+    }
+}

@@ -2,10 +2,16 @@ use anyhow::*;
 use fs_extra::copy_items;
 use fs_extra::dir::CopyOptions;
 use std::env;
+use std::result::Result::Ok;
 
 fn main() -> Result<()> {
-    // This tells Cargo to rerun this script if something in /res/ changes.
-    println!("cargo::rerun-if-changed=res/*");
+    for entry in glob::glob("res/**/*").expect("failed to read res/ glob :(") {
+        match entry {
+            Ok(path) => println!("cargo::rerun-if-changed={}", path.display()),
+            Err(e) => eprintln!("glob error: {}", e),
+        }
+    }
+    println!("cargo::rerun-if-changed=res");
 
     let out_dir = env::var("OUT_DIR")?;
     let mut copy_options = CopyOptions::new();

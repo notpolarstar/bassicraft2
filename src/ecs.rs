@@ -131,6 +131,11 @@ pub enum EntityType {
 pub struct Player;
 
 #[derive(Component, Clone, Copy, Debug)]
+pub struct RemotePlayer {
+    pub player_id: u32,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerInput {
     pub forward: f32,
     pub backward: f32,
@@ -619,7 +624,67 @@ impl EcsWorld {
         
         particles
     }
-    
+
+    pub fn sync_remote_players(
+        &mut self,
+        states: &[crate::network::PlayerState],
+        my_id: Option<u32>,
+    ) {
+        use std::collections::{HashMap, HashSet};
+
+        let existing: HashMap<u32, Entity> = {
+            let mut q = self.world.query::<(Entity, &RemotePlayer)>();
+            q.iter(&self.world).map(|(e, rp)| (rp.player_id, e)).collect()
+        };
+
+        let snapshot_ids: HashSet<u32> = states.iter().map(|s| s.id).collect();
+
+        let to_despawn: Vec<Entity> = existing
+            .iter()
+            .filter(|(id, _)| !snapshot_ids.contains(id))
+            .map(|(_, &e)| e)
+            .collect();
+        for entity in to_despawn {
+            self.world.despawn(entity);
+        }
+
+        for state in states {
+            if Some(state.id) == my_id {
+                continue;
+            }
+            let pos = Vector3::new(state.position.x, state.position.y, state.position.z);
+            
+            let model_yaw = -state.yaw - std::f32::consts::FRAC_PI_2;
+            let rotation = Quaternion::new(
+                (model_yaw / 2.0).cos(),
+                0.0,
+                (model_yaw / 2.0).sin(),
+                0.0,
+            );
+
+            if let Some(&entity) = existing.get(&state.id) {
+                if let Some(mut transform) = self.world.get_mut::<Transform>(entity) {
+                    transform.position = pos;
+                    transform.rotation = rotation;
+                }
+            } else {
+                spawn_remote_player(&mut self.world, state.id, pos);
+            }
+        }
+    }
+
+    pub fn remove_remote_player(&mut self, player_id: u32) {
+        let entity = {
+            let mut q = self.world.query::<(Entity, &RemotePlayer)>();
+            q.iter(&self.world)
+                .find(|(_, rp)| rp.player_id == player_id)
+                .map(|(e, _)| e)
+        };
+        if let Some(entity) = entity {
+            self.world.despawn(entity);
+        }
+    }
+
     pub fn get_player_position(&mut self) -> Option<Vector3<f32>> {
         let mut query = self.world.query::<(&Player, &Transform)>();
         query.iter(&self.world)
@@ -719,6 +784,22 @@ pub fn spawn_player(world: &mut World, position: Vector3<f32>) -> Entity {
         Health {
             current: 100.0,
             max: 100.0,
+        },
+    ));
+    entity.id()
+}
+
+pub fn spawn_remote_player(world: &mut World, player_id: u32, position: Vector3<f32>) -> Entity {
+    let mut entity = world.spawn_empty();
+    entity.insert((
+        RemotePlayer { player_id },
+        Transform {
+            position,
+            ..Default::default()
+        },
+        Model {
+            model_name: "steve.obj".to_string(),
+            model_handle: None,
         },
     ));
     entity.id()

@@ -34,6 +34,8 @@ mod ecs;
 
 mod particles;
 
+mod network;
+
 // #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
     cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
@@ -189,6 +191,12 @@ pub struct State {
     particle_index_buffer: wgpu::Buffer,
     particle_instance_buffer: wgpu::Buffer,
     particle_instance_capacity: usize,
+
+    net_client: Option<network::NetClient>,
+    #[cfg(not(target_arch = "wasm32"))]
+    net_server: Option<network::NetServer>,
+    multiplayer_panel: gui::MultiplayerPanel,
+    net_tick_accumulator: f32,
 }
 
 impl State {
@@ -810,6 +818,11 @@ impl State {
             particle_index_buffer,
             particle_instance_buffer,
             particle_instance_capacity: MAX_PARTICLES,
+            net_client: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            net_server: None,
+            multiplayer_panel: gui::MultiplayerPanel::default(),
+            net_tick_accumulator: 0.0,
             // cursor_locked: false,
         })
     }
@@ -868,6 +881,18 @@ impl State {
                     if let Some(pos) = self.player.get_block_pointed_at(&self.world.chunks) {
                         if let Some(block_type) = self.world.break_block(&self.device, &self.queue, pos) {
                             if block_type != 0 {
+                                if let Some(client) = &self.net_client {
+                                    client.send(&network::ClientMessage::BreakBlock {
+                                        x: pos[0], y: pos[1], z: pos[2],
+                                    });
+                                }
+                                #[cfg(not(target_arch = "wasm32"))]
+                                if let Some(server) = &self.net_server {
+                                    server.broadcast(&network::ServerMessage::BlockUpdate {
+                                        x: pos[0], y: pos[1], z: pos[2], block_type: 0,
+                                    });
+                                }
+
                                 for _ in 0..8 {
                                     let random1 = random::get_random_f32_normalized().unwrap();
                                     let random2 = random::get_random_f32_normalized().unwrap();
@@ -903,12 +928,21 @@ impl State {
             MouseButton::Right => {
                 self.mouse_pressed = pressed;
                 if pressed {
-                    // if !self.player.cursor_locked {
-                    //     self.lock_cursor();
-                    // }
-                    
                     if let Some(pos) = self.player.get_block_placement_pos(&self.world.chunks) {
-                        self.world.place_block(&self.device, &self.queue, pos, self.player.selected_block);
+                        let block_type = self.player.selected_block;
+                        self.world.place_block(&self.device, &self.queue, pos, block_type);
+
+                        if let Some(client) = &self.net_client {
+                            client.send(&network::ClientMessage::PlaceBlock {
+                                x: pos[0], y: pos[1], z: pos[2], block_type,
+                            });
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some(server) = &self.net_server {
+                            server.broadcast(&network::ServerMessage::BlockUpdate {
+                                x: pos[0], y: pos[1], z: pos[2], block_type,
+                            });
+                        }
                     }
                 }
             }
@@ -1009,6 +1043,127 @@ impl State {
             0,
             bytemuck::cast_slice(&instance_data),
         );
+
+        self.net_tick_accumulator += dt_secs;
+        const NET_TICK_RATE: f32 = 1.0 / 20.0;
+        if self.net_tick_accumulator >= NET_TICK_RATE {
+            self.net_tick_accumulator = 0.0;
+            self.network_tick();
+        }
+    }
+
+    fn network_tick(&mut self) {
+        if let Some(client) = &self.net_client {
+            let cam = &self.player.camera;
+            let pos = self.ecs_world.get_player_position()
+                .unwrap_or_else(|| cgmath::Vector3::new(
+                    cam.position.x, cam.position.y, cam.position.z
+                ));
+            client.send(&network::ClientMessage::PlayerInput {
+                forward:  self.player.camera_controller.amount_forward,
+                backward: self.player.camera_controller.amount_backward,
+                left:     self.player.camera_controller.amount_left,
+                right:    self.player.camera_controller.amount_right,
+                jump:     self.player.camera_controller.amount_up > 0.0,
+                yaw:      cam.yaw().0,
+                pitch:    cam.pitch().0,
+                position: network::Vec3Net::new(pos.x, pos.y, pos.z),
+            });
+        }
+
+        let server_msgs: Vec<network::ServerMessage> = if let Some(client) = &mut self.net_client {
+            client.poll()
+        } else {
+            Vec::new()
+        };
+
+        for msg in server_msgs {
+            match msg {
+                network::ServerMessage::Welcome { player_id, spawn } => {
+                    self.multiplayer_panel.on_connected(player_id);
+                    log::info!("Welcome! My player ID: {}, spawn: {:?}", player_id, spawn);
+                }
+                network::ServerMessage::PlayerStates(states) => {
+                    let my_id = self.net_client.as_ref().and_then(|c| c.my_id);
+                    self.ecs_world.sync_remote_players(&states, my_id);
+                }
+                network::ServerMessage::BlockUpdate { x, y, z, block_type } => {
+                    if block_type == 0 {
+                        self.world.break_block(&self.device, &self.queue, [x, y, z]);
+                    } else {
+                        self.world.place_block(&self.device, &self.queue, [x, y, z], block_type);
+                    }
+                }
+                network::ServerMessage::ChunkData { cx, cz, blocks } => {
+                    let mut i = 0;
+                    while i + 3 < blocks.len() {
+                        let lx = blocks[i]     as i32;
+                        let ly = blocks[i + 1] as i32;
+                        let lz = blocks[i + 2] as i32;
+                        let mat = blocks[i + 3];
+                        let world_x = cx * 16 + lx;
+                        let world_z = cz * 16 + lz;
+                        if mat != 0 {
+                            self.world.place_block(&self.device, &self.queue, [world_x, ly, world_z], mat);
+                        }
+                        i += 4;
+                    }
+                }
+                network::ServerMessage::AvailableChunks(positions) => {
+                    if let Some(client) = &self.net_client {
+                        for [cx, cz] in positions {
+                            client.send(&network::ClientMessage::RequestChunk { cx, cz });
+                        }
+                    }
+                }
+                network::ServerMessage::PlayerLeft { player_id } => {
+                    log::info!("Player {} left", player_id);
+                    self.ecs_world.remove_remote_player(player_id);
+                }
+                network::ServerMessage::Chat { sender_id, message } => {
+                    self.multiplayer_panel.push_chat(sender_id, message);
+                }
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(server) = &self.net_server {
+            let events = server.poll_incoming();
+            for ev in events {
+                match ev.message {
+                    network::ClientMessage::BreakBlock { x, y, z } => {
+                        self.world.break_block(&self.device, &self.queue, [x, y, z]);
+                        server.broadcast(&network::ServerMessage::BlockUpdate {
+                            x, y, z, block_type: 0,
+                        });
+                    }
+                    network::ClientMessage::PlaceBlock { x, y, z, block_type } => {
+                        self.world.place_block(&self.device, &self.queue, [x, y, z], block_type);
+                        server.broadcast(&network::ServerMessage::BlockUpdate {
+                            x, y, z, block_type,
+                        });
+                    }
+                    network::ClientMessage::RequestChunk { cx, cz } => {
+                        if let Some(chunk) = self.world.chunks.iter().find(|c| c.pos == [cx, cz]) {
+                            let blocks = network::serialize_chunk_blocks(chunk);
+                            server.send_to_client(ev.player_id, &network::ServerMessage::ChunkData {
+                                cx, cz, blocks,
+                            });
+                        }
+                    }
+                    network::ClientMessage::Chat { message } => {
+                        server.broadcast(&network::ServerMessage::Chat {
+                            sender_id: ev.player_id,
+                            message,
+                        });
+                    }
+                    network::ClientMessage::PlayerInput { .. } => {
+                        let states = server.player_states_snapshot();
+                        server.broadcast(&network::ServerMessage::PlayerStates(states));
+                    }
+                }
+            }
+        }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -1263,6 +1418,69 @@ impl State {
 
                             // ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
                         });
+
+                    let mp_action = self.multiplayer_panel.draw(ctx);
+                    match mp_action {
+                        gui::MultiplayerAction::Host { port } => {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            match network::NetServer::start(port) {
+                                Ok(server) => {
+                                    self.multiplayer_panel.lan_address = Some(server.lan_address.clone());
+                                    self.multiplayer_panel.status = format!("Hosting on port {}", port);
+                                    self.multiplayer_panel.is_hosting = true;
+                                    match network::NetClient::connect(&format!("ws://127.0.0.1:{}", port)) {
+                                        Ok(client) => { self.net_client = Some(client); }
+                                        Err(e) => log::error!("Host self-connect failed: {}", e),
+                                    }
+                                    self.net_server = Some(server);
+                                    if let Some(srv) = &self.net_server {
+                                        let positions: Vec<[i32; 2]> = self.world.chunks.iter().map(|c| c.pos).collect();
+                                        srv.broadcast(&network::ServerMessage::AvailableChunks(positions));
+                                    }
+                                }
+                                Err(e) => {
+                                    self.multiplayer_panel.status = format!("Host failed: {}", e);
+                                }
+                            }
+                        }
+                        gui::MultiplayerAction::Join { url } => {
+                            match network::NetClient::connect(&url) {
+                                Ok(client) => {
+                                    self.net_client = Some(client);
+                                    self.multiplayer_panel.status = format!("Connecting to {}…", url);
+                                }
+                                Err(e) => {
+                                    self.multiplayer_panel.status = format!("Connect failed: {}", e);
+                                }
+                            }
+                        }
+                        gui::MultiplayerAction::Disconnect => {
+                            self.net_client = None;
+                            #[cfg(not(target_arch = "wasm32"))]
+                            { self.net_server = None; }
+                            self.multiplayer_panel.is_connected = false;
+                            self.multiplayer_panel.is_hosting  = false;
+                            self.multiplayer_panel.lan_address = None;
+                            self.multiplayer_panel.status      = "Disconnected".to_string();
+                        }
+                        gui::MultiplayerAction::RequestChunks => {
+                            let msg = std::mem::take(&mut self.multiplayer_panel.chat_input);
+                            if !msg.is_empty() {
+                                if let Some(client) = &self.net_client {
+                                    client.send(&network::ClientMessage::Chat { message: msg });
+                                }
+                                #[cfg(not(target_arch = "wasm32"))]
+                                if let Some(server) = &self.net_server {
+                                    let my_id = self.net_client.as_ref().and_then(|c| c.my_id).unwrap_or(0);
+                                    server.broadcast(&network::ServerMessage::Chat {
+                                        sender_id: my_id,
+                                        message: std::mem::take(&mut self.multiplayer_panel.chat_input),
+                                    });
+                                }
+                            }
+                        }
+                        gui::MultiplayerAction::None => {}
+                    }
                     }
 
                 if self.player.show_inventory {
@@ -1381,10 +1599,12 @@ impl State {
             }
         }
 
-        if self.player.show_inventory {
-            self.unlock_cursor();
-        } else {
-            self.lock_cursor();
+        if is_pressed {
+            if self.player.show_inventory {
+                self.unlock_cursor();
+            } else {
+                self.lock_cursor();
+            }
         }
     }
 }

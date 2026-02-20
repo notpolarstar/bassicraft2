@@ -28,6 +28,14 @@ egui-winit = { version = "0.33", default-features = false }
 egui_extras = { version = "0.33.3", features = ["all_loaders", "image"] }
 bevy_ecs = "0.15"
 getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.28"
+futures-util = "0.3"
+local-ip-address = "0.6"
 
 [dependencies.image]
 version = "0.24"
@@ -45,6 +53,11 @@ web-sys = { version = "0.3", features = [
     "Window",
     "Element",
     "Location",
+    "WebSocket",
+    "MessageEvent",
+    "ErrorEvent",
+    "CloseEvent",
+    "BinaryType",
 ]}
 reqwest = { version = "0.11" }
 instant = { version = "0.1", features = [ "wasm-bindgen" ] }
