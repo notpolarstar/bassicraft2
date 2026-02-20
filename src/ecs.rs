@@ -131,6 +131,16 @@ pub enum EntityType {
 pub struct Player;
 
 #[derive(Component, Clone, Copy, Debug)]
+pub struct NetId {
+    pub id: u32,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct RemoteEntity {
+    pub net_id: u32,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
 pub struct RemotePlayer {
     pub player_id: u32,
 }
@@ -186,65 +196,6 @@ pub fn health_system(
     }
 }
 
-pub fn entity_collision_system(
-    mut query: Query<(Entity, &mut Transform, &mut Physics, &Collider), Without<Particle>>,
-) {
-    use std::collections::HashMap;
-
-    let snapshot: Vec<(Entity, Vector3<f32>, Collider)> = query
-        .iter()
-        .map(|(e, t, _, c)| (e, t.position, *c))
-        .collect();
-
-    let mut pushes: HashMap<Entity, Vector3<f32>> = HashMap::new();
-
-    for i in 0..snapshot.len() {
-        for j in (i + 1)..snapshot.len() {
-            let (ea, pos_a, col_a) = snapshot[i];
-            let (eb, pos_b, col_b) = snapshot[j];
-
-            let ca = Vector3::new(pos_a.x, pos_a.y + col_a.height * 0.5, pos_a.z);
-            let cb = Vector3::new(pos_b.x, pos_b.y + col_b.height * 0.5, pos_b.z);
-
-            let half_ax = col_a.width  * 0.5;
-            let half_ay = col_a.height * 0.5;
-            let half_az = col_a.depth  * 0.5;
-            let half_bx = col_b.width  * 0.5;
-            let half_by = col_b.height * 0.5;
-            let half_bz = col_b.depth  * 0.5;
-
-            let diff = cb - ca;
-            let overlap_x = (half_ax + half_bx) - diff.x.abs();
-            let overlap_y = (half_ay + half_by) - diff.y.abs();
-            let overlap_z = (half_az + half_bz) - diff.z.abs();
-
-            if overlap_x <= 0.0 || overlap_y <= 0.0 || overlap_z <= 0.0 {
-                continue;
-            }
-
-            let (push_dir, push_amt) = if overlap_x <= overlap_z {
-                let sign = if diff.x >= 0.0 { -1.0_f32 } else { 1.0_f32 };
-                (Vector3::new(sign, 0.0, 0.0), overlap_x * 0.5)
-            } else {
-                let sign = if diff.z >= 0.0 { -1.0_f32 } else { 1.0_f32 };
-                (Vector3::new(0.0, 0.0, sign), overlap_z * 0.5)
-            };
-
-            let push = push_dir * push_amt;
-            *pushes.entry(ea).or_insert(Vector3::zero()) += push;
-            *pushes.entry(eb).or_insert(Vector3::zero()) -= push;
-        }
-    }
-
-    for (entity, mut transform, mut physics, _) in query.iter_mut() {
-        if let Some(&push) = pushes.get(&entity) {
-            transform.position += push;
-            if push.x.abs() > 0.0 { physics.velocity.x *= 0.3; }
-            if push.z.abs() > 0.0 { physics.velocity.z *= 0.3; }
-        }
-    }
-}
-
 pub fn particle_lifetime_system(
     mut commands: Commands,
     mut query: Query<(Entity, &mut Particle)>,
@@ -277,6 +228,7 @@ impl Time {
 pub struct EcsWorld {
     pub world: World,
     pub schedule: Schedule,
+    net_id_counter: u32,
 }
 
 impl EcsWorld {
@@ -286,9 +238,15 @@ impl EcsWorld {
         
         let mut schedule = Schedule::default();
 
-        schedule.add_systems((health_system, particle_lifetime_system, entity_collision_system));
+        schedule.add_systems((health_system, particle_lifetime_system));
         
-        Self { world, schedule }
+        Self { world, schedule, net_id_counter: 1 }
+    }
+
+    pub fn alloc_net_id(&mut self) -> u32 {
+        let id = self.net_id_counter;
+        self.net_id_counter += 1;
+        id
     }
 
     fn is_block_solid_at(chunks: &[crate::chunk::Chunk], world_pos: Vector3<f32>) -> bool {
@@ -659,6 +617,106 @@ impl EcsWorld {
         }
 
         self.schedule.run(&mut self.world);
+
+        {
+            use std::collections::HashMap;
+
+            let dynamic: Vec<(Entity, Vector3<f32>, Collider)> = {
+                let mut q = self.world.query::<(Entity, &Transform, &Physics, &Collider, Option<&Particle>)>();
+                q.iter(&self.world)
+                    .filter(|(_, _, _, _, p)| p.is_none())
+                    .map(|(e, t, _, c, _)| (e, t.position, *c))
+                    .collect()
+            };
+
+            let statics: Vec<(Vector3<f32>, Collider)> = {
+                let mut q = self.world.query_filtered::<(&Transform, &Collider), Without<Physics>>();
+                q.iter(&self.world)
+                    .map(|(t, c)| (t.position, *c))
+                    .collect()
+            };
+
+            let mut pushes: HashMap<Entity, Vector3<f32>> = HashMap::new();
+
+            for i in 0..dynamic.len() {
+                for j in (i + 1)..dynamic.len() {
+                    let (ea, pos_a, col_a) = dynamic[i];
+                    let (eb, pos_b, col_b) = dynamic[j];
+
+                    let ca = Vector3::new(pos_a.x, pos_a.y + col_a.height * 0.5, pos_a.z);
+                    let cb = Vector3::new(pos_b.x, pos_b.y + col_b.height * 0.5, pos_b.z);
+
+                    let half_ax = col_a.width  * 0.5;
+                    let half_ay = col_a.height * 0.5;
+                    let half_az = col_a.depth  * 0.5;
+                    let half_bx = col_b.width  * 0.5;
+                    let half_by = col_b.height * 0.5;
+                    let half_bz = col_b.depth  * 0.5;
+
+                    let diff = cb - ca;
+                    let overlap_x = (half_ax + half_bx) - diff.x.abs();
+                    let overlap_y = (half_ay + half_by) - diff.y.abs();
+                    let overlap_z = (half_az + half_bz) - diff.z.abs();
+
+                    if overlap_x <= 0.0 || overlap_y <= 0.0 || overlap_z <= 0.0 { continue; }
+
+                    let (push_dir, push_amt) = if overlap_x <= overlap_z {
+                        let sign = if diff.x >= 0.0 { -1.0_f32 } else { 1.0_f32 };
+                        (Vector3::new(sign, 0.0, 0.0), overlap_x * 0.5)
+                    } else {
+                        let sign = if diff.z >= 0.0 { -1.0_f32 } else { 1.0_f32 };
+                        (Vector3::new(0.0, 0.0, sign), overlap_z * 0.5)
+                    };
+
+                    let push = push_dir * push_amt;
+                    *pushes.entry(ea).or_insert(Vector3::zero()) += push;
+                    *pushes.entry(eb).or_insert(Vector3::zero()) -= push;
+                }
+            }
+
+            for (ent, pos_d, col_d) in &dynamic {
+                for (pos_s, col_s) in &statics {
+                    let cd = Vector3::new(pos_d.x, pos_d.y + col_d.height * 0.5, pos_d.z);
+                    let cs = Vector3::new(pos_s.x, pos_s.y + col_s.height * 0.5, pos_s.z);
+
+                    let half_dx = col_d.width  * 0.5;
+                    let half_dy = col_d.height * 0.5;
+                    let half_dz = col_d.depth  * 0.5;
+                    let half_sx = col_s.width  * 0.5;
+                    let half_sy = col_s.height * 0.5;
+                    let half_sz = col_s.depth  * 0.5;
+
+                    let diff = cs - cd;
+                    let overlap_x = (half_dx + half_sx) - diff.x.abs();
+                    let overlap_y = (half_dy + half_sy) - diff.y.abs();
+                    let overlap_z = (half_dz + half_sz) - diff.z.abs();
+
+                    if overlap_x <= 0.0 || overlap_y <= 0.0 || overlap_z <= 0.0 { continue; }
+
+                    let push = if overlap_x <= overlap_z {
+                        let sign = if diff.x >= 0.0 { -1.0_f32 } else { 1.0_f32 };
+                        Vector3::new(sign * overlap_x, 0.0, 0.0)
+                    } else {
+                        let sign = if diff.z >= 0.0 { -1.0_f32 } else { 1.0_f32 };
+                        Vector3::new(0.0, 0.0, sign * overlap_z)
+                    };
+                    *pushes.entry(*ent).or_insert(Vector3::zero()) += push;
+                }
+            }
+
+            let mut q = self.world.query::<(Entity, &mut Transform, &mut Physics, &Collider, Option<&Particle>)>();
+            for (entity, mut transform, mut physics, collider, is_particle) in q.iter_mut(&mut self.world) {
+                if is_particle.is_some() { continue; }
+                if let Some(&push) = pushes.get(&entity) {
+                    let new_pos = transform.position + push;
+                    if !Self::check_collision(chunks, new_pos, collider) {
+                        transform.position = new_pos;
+                        if push.x.abs() > 0.0 { physics.velocity.x *= 0.3; }
+                        if push.z.abs() > 0.0 { physics.velocity.z *= 0.3; }
+                    }
+                }
+            }
+        }
     }
     
     pub fn get_entities_render_data(&mut self) -> Vec<(Vector3<f32>, Quaternion<f32>, String)> {
@@ -732,6 +790,69 @@ impl EcsWorld {
         }
     }
 
+    pub fn get_networked_entities_data(&mut self) -> Vec<crate::network::EntityState> {
+        let mut result = Vec::new();
+        let mut q = self.world.query::<(&Transform, &Model, &NetId)>();
+        for (transform, model, net_id) in q.iter(&self.world) {
+            let yaw = 2.0 * transform.rotation.v.y.atan2(transform.rotation.s);
+            result.push(crate::network::EntityState {
+                net_id: net_id.id,
+                position: crate::network::Vec3Net::new(
+                    transform.position.x,
+                    transform.position.y,
+                    transform.position.z,
+                ),
+                yaw,
+                model_name: model.model_name.clone(),
+            });
+        }
+        result
+    }
+
+    pub fn sync_network_entities(&mut self, entities: &[crate::network::EntityState]) {
+        use std::collections::{HashMap, HashSet};
+
+        let existing: HashMap<u32, Entity> = {
+            let mut q = self.world.query::<(Entity, &RemoteEntity)>();
+            q.iter(&self.world).map(|(e, re)| (re.net_id, e)).collect()
+        };
+
+        let incoming_ids: HashSet<u32> = entities.iter().map(|s| s.net_id).collect();
+
+        let to_despawn: Vec<Entity> = existing
+            .iter()
+            .filter(|(id, _)| !incoming_ids.contains(id))
+            .map(|(_, &e)| e)
+            .collect();
+        for e in to_despawn {
+            self.world.despawn(e);
+        }
+
+        for state in entities {
+            let pos = Vector3::new(state.position.x, state.position.y, state.position.z);
+            let rotation = Quaternion::new(
+                (state.yaw / 2.0).cos(),
+                0.0,
+                (state.yaw / 2.0).sin(),
+                0.0,
+            );
+
+            if let Some(&entity) = existing.get(&state.net_id) {
+                if let Some(mut transform) = self.world.get_mut::<Transform>(entity) {
+                    transform.position = pos;
+                    transform.rotation = rotation;
+                }
+            } else {
+                self.world.spawn((
+                    RemoteEntity { net_id: state.net_id },
+                    Transform { position: pos, rotation, ..Default::default() },
+                    Model { model_name: state.model_name.clone(), model_handle: None },
+                    Collider::default(),
+                ));
+            }
+        }
+    }
+
     pub fn remove_remote_player(&mut self, player_id: u32) {
         let entity = {
             let mut q = self.world.query::<(Entity, &RemotePlayer)>();
@@ -740,6 +861,26 @@ impl EcsWorld {
                 .map(|(e, _)| e)
         };
         if let Some(entity) = entity {
+            self.world.despawn(entity);
+        }
+    }
+
+    pub fn clear_remote_entities(&mut self) {
+        let to_despawn: Vec<Entity> = {
+            let mut q = self.world.query_filtered::<Entity, Or<(With<RemotePlayer>, With<RemoteEntity>)>>();
+            q.iter(&self.world).collect()
+        };
+        for entity in to_despawn {
+            self.world.despawn(entity);
+        }
+    }
+
+    pub fn clear_local_mobs(&mut self) {
+        let to_despawn: Vec<Entity> = {
+            let mut q = self.world.query_filtered::<Entity, With<NetId>>();
+            q.iter(&self.world).collect()
+        };
+        for entity in to_despawn {
             self.world.despawn(entity);
         }
     }
@@ -763,7 +904,7 @@ impl EcsWorld {
     }
 }
 
-pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name: String) -> Entity {
+pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name: String, net_id: u32) -> Entity {
     let random_seed = random::get_random_f32().unwrap();
     let mut entity = world.spawn_empty();
     entity.insert((
@@ -789,11 +930,12 @@ pub fn spawn_following_mob(world: &mut World, position: Vector3<f32>, model_name
             name: "follow",
             entity_type: EntityType::Mob,
         },
+        NetId { id: net_id },
     ));
     entity.id()
 }
 
-pub fn spawn_wandering_mob(world: &mut World, position: Vector3<f32>, model_name: String) -> Entity {
+pub fn spawn_wandering_mob(world: &mut World, position: Vector3<f32>, model_name: String, net_id: u32) -> Entity {
     let random_seed = random::get_random_f32().unwrap();
     let mut entity = world.spawn_empty();
     entity.insert((
@@ -818,6 +960,7 @@ pub fn spawn_wandering_mob(world: &mut World, position: Vector3<f32>, model_name
             name: "wander",
             entity_type: EntityType::Mob,
         },
+        NetId { id: net_id },
     ));
     entity.id()
 }
@@ -860,6 +1003,7 @@ pub fn spawn_remote_player(world: &mut World, player_id: u32, position: Vector3<
             model_name: "steve.obj".to_string(),
             model_handle: None,
         },
+        Collider::default(),
     ));
     entity.id()
 }

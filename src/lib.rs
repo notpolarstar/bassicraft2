@@ -768,18 +768,22 @@ impl State {
 
         // test entities
         for i in 0..5 {
+            let net_id = ecs_world.alloc_net_id();
             ecs::spawn_wandering_mob(
                 &mut ecs_world.world,
                 cgmath::Vector3::new(5.0 + i as f32 * 2.0, 95.0, 5.0),
                 "cube.obj".to_string(),
+                net_id,
             );
         }
         
         for i in 0..5 {
+            let net_id = ecs_world.alloc_net_id();
             ecs::spawn_following_mob(
                 &mut ecs_world.world,
                 cgmath::Vector3::new(-5.0 - i as f32 * 2.0, 95.0, -5.0),
                 "steve.obj".to_string(),
+                net_id,
             );
         }
 
@@ -1082,10 +1086,30 @@ impl State {
                 network::ServerMessage::Welcome { player_id, spawn } => {
                     self.multiplayer_panel.on_connected(player_id);
                     log::info!("Welcome! My player ID: {}, spawn: {:?}", player_id, spawn);
+                    let is_host = {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        { self.net_server.is_some() }
+                        #[cfg(target_arch = "wasm32")]
+                        { false }
+                    };
+                    if !is_host {
+                        self.ecs_world.clear_local_mobs();
+                    }
                 }
                 network::ServerMessage::PlayerStates(states) => {
                     let my_id = self.net_client.as_ref().and_then(|c| c.my_id);
                     self.ecs_world.sync_remote_players(&states, my_id);
+                }
+                network::ServerMessage::EntityStates(states) => {
+                    let is_host = {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        { self.net_server.is_some() }
+                        #[cfg(target_arch = "wasm32")]
+                        { false }
+                    };
+                    if !is_host {
+                        self.ecs_world.sync_network_entities(&states);
+                    }
                 }
                 network::ServerMessage::BlockUpdate { x, y, z, block_type } => {
                     if block_type == 0 {
@@ -1160,6 +1184,11 @@ impl State {
                     network::ClientMessage::PlayerInput { .. } => {
                         let states = server.player_states_snapshot();
                         server.broadcast(&network::ServerMessage::PlayerStates(states));
+
+                        let entity_states = self.ecs_world.get_networked_entities_data();
+                        if !entity_states.is_empty() {
+                            server.broadcast(&network::ServerMessage::EntityStates(entity_states));
+                        }
                     }
                 }
             }
@@ -1458,6 +1487,7 @@ impl State {
                             self.net_client = None;
                             #[cfg(not(target_arch = "wasm32"))]
                             { self.net_server = None; }
+                            self.ecs_world.clear_remote_entities();
                             self.multiplayer_panel.is_connected = false;
                             self.multiplayer_panel.is_hosting  = false;
                             self.multiplayer_panel.lan_address = None;

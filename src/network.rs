@@ -31,6 +31,14 @@ pub struct PlayerState {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct EntityState {
+    pub net_id:     u32,
+    pub position:   Vec3Net,
+    pub yaw:        f32,
+    pub model_name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
     PlayerInput {
@@ -57,6 +65,7 @@ pub enum ServerMessage {
         spawn:     Vec3Net,
     },
     PlayerStates(Vec<PlayerState>),
+    EntityStates(Vec<EntityState>),
     BlockUpdate { x: i32, y: i32, z: i32, block_type: u32 },
     ChunkData { cx: i32, cz: i32, blocks: Vec<u32> },
     AvailableChunks(Vec<[i32; 2]>),
