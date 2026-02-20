@@ -478,9 +478,13 @@ impl State {
         if let Ok(cube_model) = resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout).await {
             loaded_models.insert("cube.obj".to_string(), cube_model);
         }
-        
+
         if let Ok(steve_model) = resources::load_model("steve.obj", &device, &queue, &texture_bind_group_layout).await {
             loaded_models.insert("steve.obj".to_string(), steve_model);
+        }
+
+        if let Ok(creeper_model) = resources::load_model("Creeper.obj", &device, &queue, &texture_bind_group_layout).await {
+            loaded_models.insert("Creeper.obj".to_string(), creeper_model);
         }
 
         let world = world::World::new(&device, &queue, 0x1f6c2);
@@ -782,7 +786,7 @@ impl State {
             ecs::spawn_following_mob(
                 &mut ecs_world.world,
                 cgmath::Vector3::new(-5.0 - i as f32 * 2.0, 95.0, -5.0),
-                "steve.obj".to_string(),
+                "Creeper.obj".to_string(),
                 net_id,
             );
         }

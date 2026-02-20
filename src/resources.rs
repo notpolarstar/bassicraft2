@@ -86,7 +86,14 @@ pub async fn load_model(
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_texture = load_texture(&m.diffuse_texture, device, queue).await?;
+        let diffuse_texture = if m.diffuse_texture.trim().is_empty() {
+            let white = image::DynamicImage::ImageRgba8(
+                image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255]))
+            );
+            texture::Texture::from_image(device, queue, &white, Some("fallback_white"))?
+        } else {
+            load_texture(m.diffuse_texture.trim(), device, queue).await?
+        };
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout,
             entries: &[
