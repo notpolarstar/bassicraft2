@@ -186,6 +186,65 @@ pub fn health_system(
     }
 }
 
+pub fn entity_collision_system(
+    mut query: Query<(Entity, &mut Transform, &mut Physics, &Collider), Without<Particle>>,
+) {
+    use std::collections::HashMap;
+
+    let snapshot: Vec<(Entity, Vector3<f32>, Collider)> = query
+        .iter()
+        .map(|(e, t, _, c)| (e, t.position, *c))
+        .collect();
+
+    let mut pushes: HashMap<Entity, Vector3<f32>> = HashMap::new();
+
+    for i in 0..snapshot.len() {
+        for j in (i + 1)..snapshot.len() {
+            let (ea, pos_a, col_a) = snapshot[i];
+            let (eb, pos_b, col_b) = snapshot[j];
+
+            let ca = Vector3::new(pos_a.x, pos_a.y + col_a.height * 0.5, pos_a.z);
+            let cb = Vector3::new(pos_b.x, pos_b.y + col_b.height * 0.5, pos_b.z);
+
+            let half_ax = col_a.width  * 0.5;
+            let half_ay = col_a.height * 0.5;
+            let half_az = col_a.depth  * 0.5;
+            let half_bx = col_b.width  * 0.5;
+            let half_by = col_b.height * 0.5;
+            let half_bz = col_b.depth  * 0.5;
+
+            let diff = cb - ca;
+            let overlap_x = (half_ax + half_bx) - diff.x.abs();
+            let overlap_y = (half_ay + half_by) - diff.y.abs();
+            let overlap_z = (half_az + half_bz) - diff.z.abs();
+
+            if overlap_x <= 0.0 || overlap_y <= 0.0 || overlap_z <= 0.0 {
+                continue;
+            }
+
+            let (push_dir, push_amt) = if overlap_x <= overlap_z {
+                let sign = if diff.x >= 0.0 { -1.0_f32 } else { 1.0_f32 };
+                (Vector3::new(sign, 0.0, 0.0), overlap_x * 0.5)
+            } else {
+                let sign = if diff.z >= 0.0 { -1.0_f32 } else { 1.0_f32 };
+                (Vector3::new(0.0, 0.0, sign), overlap_z * 0.5)
+            };
+
+            let push = push_dir * push_amt;
+            *pushes.entry(ea).or_insert(Vector3::zero()) += push;
+            *pushes.entry(eb).or_insert(Vector3::zero()) -= push;
+        }
+    }
+
+    for (entity, mut transform, mut physics, _) in query.iter_mut() {
+        if let Some(&push) = pushes.get(&entity) {
+            transform.position += push;
+            if push.x.abs() > 0.0 { physics.velocity.x *= 0.3; }
+            if push.z.abs() > 0.0 { physics.velocity.z *= 0.3; }
+        }
+    }
+}
+
 pub fn particle_lifetime_system(
     mut commands: Commands,
     mut query: Query<(Entity, &mut Particle)>,
@@ -227,7 +286,7 @@ impl EcsWorld {
         
         let mut schedule = Schedule::default();
 
-        schedule.add_systems((health_system, particle_lifetime_system));
+        schedule.add_systems((health_system, particle_lifetime_system, entity_collision_system));
         
         Self { world, schedule }
     }
