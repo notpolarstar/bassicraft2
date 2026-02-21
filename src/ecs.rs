@@ -146,6 +146,12 @@ pub struct RemotePlayer {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
+pub struct NetworkTarget {
+    pub position: Vector3<f32>,
+    pub rotation: Quaternion<f32>,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
 pub struct PlayerInput {
     pub forward: f32,
     pub backward: f32,
@@ -717,6 +723,31 @@ impl EcsWorld {
                 }
             }
         }
+
+        {
+            let alpha = (15.0_f32 * dt).min(1.0);
+            let inv = 1.0 - alpha;
+            let mut q = self.world.query::<(&mut Transform, &NetworkTarget)>();
+            for (mut transform, target) in q.iter_mut(&mut self.world) {
+                transform.position = transform.position + (target.position - transform.position) * alpha;
+
+                let cs = transform.rotation.s;
+                let cv = transform.rotation.v;
+                let mut ts = target.rotation.s;
+                let mut tv = target.rotation.v;
+                if cs * ts + cv.x * tv.x + cv.y * tv.y + cv.z * tv.z < 0.0 {
+                    ts = -ts; tv = -tv;
+                }
+                let bs = cs * inv + ts * alpha;
+                let bx = cv.x * inv + tv.x * alpha;
+                let by = cv.y * inv + tv.y * alpha;
+                let bz = cv.z * inv + tv.z * alpha;
+                let len = (bs * bs + bx * bx + by * by + bz * bz).sqrt();
+                if len > 1e-6 {
+                    transform.rotation = Quaternion::new(bs / len, bx / len, by / len, bz / len);
+                }
+            }
+        }
     }
     
     pub fn get_entities_render_data(&mut self) -> Vec<(Vector3<f32>, Quaternion<f32>, String)> {
@@ -780,9 +811,9 @@ impl EcsWorld {
             );
 
             if let Some(&entity) = existing.get(&state.id) {
-                if let Some(mut transform) = self.world.get_mut::<Transform>(entity) {
-                    transform.position = pos;
-                    transform.rotation = rotation;
+                if let Some(mut target) = self.world.get_mut::<NetworkTarget>(entity) {
+                    target.position = pos;
+                    target.rotation = rotation;
                 }
             } else {
                 spawn_remote_player(&mut self.world, state.id, pos);
@@ -838,9 +869,9 @@ impl EcsWorld {
             );
 
             if let Some(&entity) = existing.get(&state.net_id) {
-                if let Some(mut transform) = self.world.get_mut::<Transform>(entity) {
-                    transform.position = pos;
-                    transform.rotation = rotation;
+                if let Some(mut target) = self.world.get_mut::<NetworkTarget>(entity) {
+                    target.position = pos;
+                    target.rotation = rotation;
                 }
             } else {
                 self.world.spawn((
@@ -848,6 +879,7 @@ impl EcsWorld {
                     Transform { position: pos, rotation, ..Default::default() },
                     Model { model_name: state.model_name.clone(), model_handle: None },
                     Collider::default(),
+                    NetworkTarget { position: pos, rotation },
                 ));
             }
         }
@@ -992,6 +1024,7 @@ pub fn spawn_player(world: &mut World, position: Vector3<f32>) -> Entity {
 }
 
 pub fn spawn_remote_player(world: &mut World, player_id: u32, position: Vector3<f32>) -> Entity {
+    let identity = Quaternion::new(1.0, 0.0, 0.0, 0.0);
     let mut entity = world.spawn_empty();
     entity.insert((
         RemotePlayer { player_id },
@@ -1004,6 +1037,7 @@ pub fn spawn_remote_player(world: &mut World, player_id: u32, position: Vector3<
             model_handle: None,
         },
         Collider::default(),
+        NetworkTarget { position, rotation: identity },
     ));
     entity.id()
 }
