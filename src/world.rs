@@ -4,11 +4,36 @@ use noise::OpenSimplex;
 
 use crate::{
     block::BlockVertex,
-    chunk::{CHUNK_X_SIZE, CHUNK_Y_SIZE, CHUNK_Z_SIZE, Chunk},
+    chunk::{CHUNK_X_SIZE, CHUNK_Y_SIZE, CHUNK_Z_SIZE, Chunk, block_index},
     texture_atlas::TextureAtlas,
 };
 
 use std::collections::{HashSet, VecDeque};
+
+#[cfg(not(target_arch = "wasm32"))]
+struct FrameBudget {
+    start:  std::time::Instant,
+    millis: u128,
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl FrameBudget {
+    fn new(millis: u128) -> Self { Self { start: std::time::Instant::now(), millis } }
+    fn has_time(&mut self) -> bool { self.start.elapsed().as_millis() < self.millis }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct FrameBudget {
+    remaining: usize,
+}
+#[cfg(target_arch = "wasm32")]
+impl FrameBudget {
+    fn new(millis: u128) -> Self { Self { remaining: millis as usize } }
+    fn has_time(&mut self) -> bool {
+        if self.remaining == 0 { return false; }
+        self.remaining -= 1;
+        true
+    }
+}
 
 struct ChunkGenRequest {
     pos: [i32; 2],
@@ -22,93 +47,19 @@ struct ReadyChunk {
     chunk: Chunk,
 }
 
-fn apply_boundary_faces(
-    chunk: &mut Chunk,
-    left_blocks: Option<Vec<Vec<u32>>>,
-    right_blocks: Option<Vec<Vec<u32>>>,
-    back_blocks: Option<Vec<Vec<u32>>>,
-    front_blocks: Option<Vec<Vec<u32>>>,
-) {
-    use crate::block::Block;
-    let keys: Vec<_> = chunk.blocks.keys().cloned().collect();
-    for (x, y, z) in keys {
-        let block_type = chunk.blocks.get(&(x, y, z)).map(|b| b.mat).unwrap_or(0);
-        if block_type == 0 {
-            continue;
-        }
-        let mut c = [false; 6];
-        c[0] = if z == 0 {
-            back_blocks
-                .as_ref()
-                .and_then(|b| b.get(x)?.get(y).copied())
-                .map(Block::is_blocktype_solid)
-                .unwrap_or(false)
-        } else {
-            chunk
-                .blocks
-                .get(&(x, y, z - 1))
-                .map(|b| Block::is_blocktype_solid(b.mat))
-                .unwrap_or(false)
-        };
-        c[1] = if z == CHUNK_Z_SIZE - 1 {
-            front_blocks
-                .as_ref()
-                .and_then(|b| b.get(x)?.get(y).copied())
-                .map(Block::is_blocktype_solid)
-                .unwrap_or(false)
-        } else {
-            chunk
-                .blocks
-                .get(&(x, y, z + 1))
-                .map(|b| Block::is_blocktype_solid(b.mat))
-                .unwrap_or(false)
-        };
-        c[2] = if x == 0 {
-            left_blocks
-                .as_ref()
-                .and_then(|b| b.get(z)?.get(y).copied())
-                .map(Block::is_blocktype_solid)
-                .unwrap_or(false)
-        } else {
-            chunk
-                .blocks
-                .get(&(x - 1, y, z))
-                .map(|b| Block::is_blocktype_solid(b.mat))
-                .unwrap_or(false)
-        };
-        c[3] = if x == CHUNK_X_SIZE - 1 {
-            right_blocks
-                .as_ref()
-                .and_then(|b| b.get(z)?.get(y).copied())
-                .map(Block::is_blocktype_solid)
-                .unwrap_or(false)
-        } else {
-            chunk
-                .blocks
-                .get(&(x + 1, y, z))
-                .map(|b| Block::is_blocktype_solid(b.mat))
-                .unwrap_or(false)
-        };
-        c[4] = if y == CHUNK_Y_SIZE - 1 {
-            false
-        } else {
-            chunk
-                .blocks
-                .get(&(x, y + 1, z))
-                .map(|b| Block::is_blocktype_solid(b.mat))
-                .unwrap_or(false)
-        };
-        c[5] = if y == 0 {
-            false
-        } else {
-            chunk
-                .blocks
-                .get(&(x, y - 1, z))
-                .map(|b| Block::is_blocktype_solid(b.mat))
-                .unwrap_or(false)
-        };
-        chunk.blocks.insert((x, y, z), Block::new(block_type, c));
-    }
+fn build_chunk_with_boundaries(
+    req: ChunkGenRequest,
+    noise_gen: OpenSimplex,
+) -> ReadyChunk {
+    let chunk = Chunk::new_with_boundaries(
+        req.pos,
+        noise_gen,
+        req.back_blocks,
+        req.front_blocks,
+        req.left_blocks,
+        req.right_blocks,
+    );
+    ReadyChunk { chunk }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -140,16 +91,8 @@ impl ChunkGenThread {
                             Ok(r) => r,
                             Err(_) => break,
                         };
-                        let mut chunk = Chunk::new(req.pos, noise_gen);
-                        apply_boundary_faces(
-                            &mut chunk,
-                            req.left_blocks,
-                            req.right_blocks,
-                            req.back_blocks,
-                            req.front_blocks,
-                        );
-                        chunk.regenerate_mesh();
-                        let _ = tx.send(ReadyChunk { chunk });
+                        let ready = build_chunk_with_boundaries(req, noise_gen);
+                        let _ = tx.send(ready);
                     }
                 })
                 .expect("failed to spawn chunk-gen thread");
@@ -200,16 +143,7 @@ impl ChunkGenThread {
         let mut out = Vec::new();
         while out.len() < limit {
             if let Some(req) = self.pending.pop_front() {
-                let mut chunk = Chunk::new(req.pos, self.noise_gen);
-                apply_boundary_faces(
-                    &mut chunk,
-                    req.left_blocks,
-                    req.right_blocks,
-                    req.back_blocks,
-                    req.front_blocks,
-                );
-                chunk.regenerate_mesh();
-                out.push(ReadyChunk { chunk });
+                out.push(build_chunk_with_boundaries(req, self.noise_gen));
             } else {
                 break;
             }
@@ -333,25 +267,18 @@ impl World {
         for i in 0..chunks.len() {
             let pos = chunks[i].pos;
 
-            let left_idx = chunks.iter().position(|c| c.pos == [pos[0] - 1, pos[1]]);
-            let right_idx = chunks.iter().position(|c| c.pos == [pos[0] + 1, pos[1]]);
-            let back_idx = chunks.iter().position(|c| c.pos == [pos[0], pos[1] - 1]);
-            let front_idx = chunks.iter().position(|c| c.pos == [pos[0], pos[1] + 1]);
+            let back  = chunks.iter().find(|c| c.pos == [pos[0], pos[1] - 1])
+                .map(|c| Self::get_boundary_blocks(c, 1));
+            let front = chunks.iter().find(|c| c.pos == [pos[0], pos[1] + 1])
+                .map(|c| Self::get_boundary_blocks(c, 0));
+            let left  = chunks.iter().find(|c| c.pos == [pos[0] - 1, pos[1]])
+                .map(|c| Self::get_boundary_blocks(c, 3));
+            let right = chunks.iter().find(|c| c.pos == [pos[0] + 1, pos[1]])
+                .map(|c| Self::get_boundary_blocks(c, 2));
 
-            let left_blocks = left_idx.map(|idx| Self::get_boundary_blocks(&chunks[idx], 3)); // right face of left chunk
-            let right_blocks = right_idx.map(|idx| Self::get_boundary_blocks(&chunks[idx], 2)); // left face of right chunk
-            let back_blocks = back_idx.map(|idx| Self::get_boundary_blocks(&chunks[idx], 1)); // front face of back chunk
-            let front_blocks = front_idx.map(|idx| Self::get_boundary_blocks(&chunks[idx], 0)); // back face of front chunk
-
-            Self::update_chunk_faces_with_neighbor_blocks(
-                &mut chunks[i],
-                left_blocks,
-                right_blocks,
-                back_blocks,
-                front_blocks,
-            );
-
+            chunks[i].boundary = [back, front, left, right];
             chunks[i].regenerate_mesh();
+
             let chunk_buffer = ChunkBuffer::new(
                 device,
                 std::mem::take(&mut chunks[i].mesh.vertices),
@@ -394,14 +321,15 @@ impl World {
             let chunk_pos = self.chunks[chunk_index].pos;
             let local_pos = self.chunks[chunk_index].get_local_pos(pos);
 
-            let block_type = self.chunks[chunk_index]
-                .blocks
-                .get(&(
+            let block_type = {
+                let (lx, ly, lz) = (
                     local_pos[0] as usize,
                     local_pos[1] as usize,
                     local_pos[2] as usize,
-                ))
-                .map(|b| b.mat);
+                );
+                let mat = self.chunks[chunk_index].get_block_type(lx, ly, lz);
+                if mat != 0 { Some(mat) } else { None }
+            };
 
             self.chunks[chunk_index].break_block(pos);
             self.update_chunk_mesh(device, queue, chunk_index);
@@ -487,19 +415,17 @@ impl World {
     ) {
         let render_distance = self.render_distance.max(1);
         let unload_distance = render_distance + 3;
-        const MAX_READY_PER_FRAME: usize = 32;
         let max_in_flight: usize = if cfg!(target_arch = "wasm32") {
             24
         } else {
             200
         };
-        const MAX_SEAM_FIXES_PER_FRAME: usize = 32;
 
-        let fresh = self.gen_thread.poll_ready(MAX_READY_PER_FRAME);
+        let fresh = self.gen_thread.poll_ready(8);
         self.ready_queue.extend(fresh);
 
-        let mut integrated = 0usize;
-        while integrated < MAX_READY_PER_FRAME {
+        let mut budget = FrameBudget::new(2);
+        while budget.has_time() {
             let Some(mut chunk) = self.ready_queue.pop_front().map(|r| r.chunk) else {
                 break;
             };
@@ -510,7 +436,6 @@ impl World {
             let dx = (pos[0] - player_chunk[0]).abs();
             let dz = (pos[1] - player_chunk[1]).abs();
             if dx > unload_distance || dz > unload_distance {
-                integrated += 1;
                 continue;
             }
 
@@ -533,18 +458,16 @@ impl World {
                     self.seam_fix_queue.push_back(npos);
                 }
             }
-            integrated += 1;
         }
 
-        let mut seam_count = 0;
-        while seam_count < MAX_SEAM_FIXES_PER_FRAME {
+        let mut seam_budget = FrameBudget::new(2);
+        while seam_budget.has_time() {
             let Some(npos) = self.seam_fix_queue.pop_front() else {
                 break;
             };
             if let Some(idx) = self.find_chunk(npos) {
                 self.update_chunk_mesh(device, queue, idx);
             }
-            seam_count += 1;
         }
 
         let mut i = self.chunks.len();
@@ -604,48 +527,42 @@ impl World {
     }
 
     fn get_boundary_blocks(chunk: &Chunk, face: usize) -> Vec<Vec<u32>> {
-        let mut blocks = vec![
-            vec![0u32; CHUNK_Y_SIZE];
-            match face {
-                0 | 1 => CHUNK_X_SIZE,
-                _ => CHUNK_Z_SIZE,
-            }
-        ];
+        let (outer, inner) = match face {
+            0 | 1 => (CHUNK_X_SIZE, CHUNK_Y_SIZE),
+            _ => (CHUNK_Z_SIZE, CHUNK_Y_SIZE),
+        };
+        let mut blocks = vec![vec![0u32; inner]; outer];
 
         match face {
+            // face 0: back face
             0 => {
                 for x in 0..CHUNK_X_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[x][y] = chunk.blocks.get(&(x, y, 0)).map(|b| b.mat).unwrap_or(0);
+                        blocks[x][y] = chunk.block_types[block_index(x, y, 0)];
                     }
                 }
             }
+            // face 1: front face
             1 => {
                 for x in 0..CHUNK_X_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[x][y] = chunk
-                            .blocks
-                            .get(&(x, y, CHUNK_Z_SIZE - 1))
-                            .map(|b| b.mat)
-                            .unwrap_or(0);
+                        blocks[x][y] = chunk.block_types[block_index(x, y, CHUNK_Z_SIZE - 1)];
                     }
                 }
             }
+            // face 2: left face
             2 => {
                 for z in 0..CHUNK_Z_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[z][y] = chunk.blocks.get(&(0, y, z)).map(|b| b.mat).unwrap_or(0);
+                        blocks[z][y] = chunk.block_types[block_index(0, y, z)];
                     }
                 }
             }
+            // face 3: right face
             3 => {
                 for z in 0..CHUNK_Z_SIZE {
                     for y in 0..CHUNK_Y_SIZE {
-                        blocks[z][y] = chunk
-                            .blocks
-                            .get(&(CHUNK_X_SIZE - 1, y, z))
-                            .map(|b| b.mat)
-                            .unwrap_or(0);
+                        blocks[z][y] = chunk.block_types[block_index(CHUNK_X_SIZE - 1, y, z)];
                     }
                 }
             }
@@ -653,16 +570,6 @@ impl World {
         }
 
         blocks
-    }
-
-    fn update_chunk_faces_with_neighbor_blocks(
-        chunk: &mut Chunk,
-        left_blocks: Option<Vec<Vec<u32>>>,
-        right_blocks: Option<Vec<Vec<u32>>>,
-        back_blocks: Option<Vec<Vec<u32>>>,
-        front_blocks: Option<Vec<Vec<u32>>>,
-    ) {
-        apply_boundary_faces(chunk, left_blocks, right_blocks, back_blocks, front_blocks);
     }
 
     fn update_chunk_mesh(
@@ -673,37 +580,18 @@ impl World {
     ) {
         let pos = self.chunks[chunk_index].pos;
 
-        let left_idx = self
-            .chunks
-            .iter()
-            .position(|c| c.pos == [pos[0] - 1, pos[1]]);
-        let right_idx = self
-            .chunks
-            .iter()
-            .position(|c| c.pos == [pos[0] + 1, pos[1]]);
-        let back_idx = self
-            .chunks
-            .iter()
-            .position(|c| c.pos == [pos[0], pos[1] - 1]);
-        let front_idx = self
-            .chunks
-            .iter()
-            .position(|c| c.pos == [pos[0], pos[1] + 1]);
+        let back  = self.find_chunk([pos[0], pos[1] - 1])
+            .map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 1));
+        let front = self.find_chunk([pos[0], pos[1] + 1])
+            .map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 0));
+        let left  = self.find_chunk([pos[0] - 1, pos[1]])
+            .map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 3));
+        let right = self.find_chunk([pos[0] + 1, pos[1]])
+            .map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 2));
 
-        let left_blocks = left_idx.map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 3));
-        let right_blocks = right_idx.map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 2));
-        let back_blocks = back_idx.map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 1));
-        let front_blocks = front_idx.map(|idx| Self::get_boundary_blocks(&self.chunks[idx], 0));
-
-        Self::update_chunk_faces_with_neighbor_blocks(
-            &mut self.chunks[chunk_index],
-            left_blocks,
-            right_blocks,
-            back_blocks,
-            front_blocks,
-        );
-
+        self.chunks[chunk_index].boundary = [back, front, left, right];
         self.chunks[chunk_index].regenerate_mesh();
+
         self.chunk_buffers[chunk_index].update_or_recreate(
             device,
             queue,

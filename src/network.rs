@@ -536,13 +536,19 @@ pub use wasm::NetClient;
 pub fn serialize_chunk_blocks(
     chunk: &crate::chunk::Chunk,
 ) -> Vec<u32> {
+    use crate::chunk::{CHUNK_X_SIZE, CHUNK_Y_SIZE, CHUNK_Z_SIZE, block_index};
     let mut flat = Vec::new();
-    for (&(x, y, z), block) in &chunk.blocks {
-        if block.mat != 0 {
-            flat.push(x as u32);
-            flat.push(y as u32);
-            flat.push(z as u32);
-            flat.push(block.mat);
+    for x in 0..CHUNK_X_SIZE {
+        for y in 0..CHUNK_Y_SIZE {
+            for z in 0..CHUNK_Z_SIZE {
+                let mat = chunk.block_types[block_index(x, y, z)];
+                if mat != 0 {
+                    flat.push(x as u32);
+                    flat.push(y as u32);
+                    flat.push(z as u32);
+                    flat.push(mat);
+                }
+            }
         }
     }
     flat

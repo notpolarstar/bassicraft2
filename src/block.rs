@@ -47,7 +47,7 @@ pub enum FaceDirections {
 }
 
 impl FaceDirections {
-    fn get_verts(self, mat: BlockType) -> [BlockVertex; 4] {
+    pub fn get_verts(self, mat: BlockType) -> [BlockVertex; 4] {
         let tex_coords = texture_atlas::TextureAtlas::get_block_texture_from_type(mat);
 
         match self {

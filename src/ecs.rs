@@ -417,11 +417,26 @@ impl EcsWorld {
                     physics.velocity.z = 0.0;
                 }
 
-                // temp, is here to see if collision messes up
+                const TERMINAL_VELOCITY: f32 = 80.0;
+                if physics.velocity.y < -TERMINAL_VELOCITY {
+                    physics.velocity.y = -TERMINAL_VELOCITY;
+                }
+
                 if transform.position.y < 0.0 {
                     transform.position.y = 0.0;
                     physics.velocity.y = 0.0;
                     physics.on_ground = true;
+                }
+
+                if !transform.position.x.is_finite()
+                    || !transform.position.y.is_finite()
+                    || !transform.position.z.is_finite()
+                {
+                    let safe_x = if old_pos.x.is_finite() { old_pos.x } else { 0.0 };
+                    let safe_z = if old_pos.z.is_finite() { old_pos.z } else { 0.0 };
+                    transform.position = Vector3::new(safe_x, 100.0, safe_z);
+                    physics.velocity = Vector3::zero();
+                    physics.on_ground = false;
                 }
             }
         }
@@ -606,7 +621,9 @@ impl EcsWorld {
 
                         if let Some(target) = behaviour.target_position {
                             let direction = target - transform.position;
-                            let normalized = direction.normalize();
+                            let mag2 = direction.magnitude2();
+                            if mag2 < 0.0001 { continue; }
+                            let normalized = direction / mag2.sqrt();
 
                             let target_yaw = (-normalized.x).atan2(-normalized.z);
                             let current_yaw = 2.0 * transform.rotation.v.y.atan2(transform.rotation.s);
@@ -736,6 +753,7 @@ impl EcsWorld {
             for (entity, mut transform, mut physics, collider, is_particle) in q.iter_mut(&mut self.world) {
                 if is_particle.is_some() { continue; }
                 if let Some(&push) = pushes.get(&entity) {
+                    if !push.x.is_finite() || !push.y.is_finite() || !push.z.is_finite() { continue; }
                     let new_pos = transform.position + push;
                     if !Self::check_collision(chunks, new_pos, collider) {
                         transform.position = new_pos;
