@@ -369,3 +369,151 @@ impl MultiplayerPanel {
         self.chat_log.push((sender_id, message));
     }
 }
+
+pub struct GameStats {
+    pub pos_x: f32,
+    pub pos_y: f32,
+    pub pos_z: f32,
+    pub dir_x: f32,
+    pub dir_y: f32,
+    pub dir_z: f32,
+    pub selected_block: u32,
+    pub chunks_loaded: usize,
+    pub cursor_locked: bool,
+}
+
+pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats) {
+    egui::Window::new("Bassicraft")
+        .default_pos([10.0, 10.0])
+        .show(ctx, |ui| {
+            ui.heading("Game Stats");
+            ui.separator();
+            ui.label(format!(
+                "Position: {:.1}, {:.1}, {:.1}",
+                stats.pos_x, stats.pos_y, stats.pos_z
+            ));
+            ui.label(format!(
+                "Direction: {:.2}, {:.2}, {:.2}",
+                stats.dir_x, stats.dir_y, stats.dir_z
+            ));
+            ui.label(format!("Selected block: {}", stats.selected_block));
+            ui.separator();
+            ui.label(format!("Chunks loaded: {}", stats.chunks_loaded));
+            ui.separator();
+            ui.label("Controls:");
+            ui.label("  WASD - Move");
+            ui.label("  Space - Jump");
+            ui.label("  Mouse - Look around");
+            ui.label("  Left Click - Break block");
+            ui.label("  Right Click - Place block");
+            ui.label("  P - Toggle cursor lock");
+            ui.label("  ESC - Exit");
+            ui.separator();
+            ui.label(format!(
+                "Cursor: {}",
+                if stats.cursor_locked { "Locked" } else { "Unlocked" }
+            ));
+        });
+}
+
+pub fn draw_inventory_window(ctx: &egui::Context, inv_size: u32) -> Option<u32> {
+    let mut clicked: Option<u32> = None;
+    egui::Window::new("Inventory")
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .resizable(false)
+        .collapsible(false)
+        .show(ctx, |ui| {
+            ui.add_space(5.0);
+            egui::ScrollArea::vertical()
+                .max_height(500.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("Inventory")
+                        .num_columns(8)
+                        .spacing([5.0, 5.0])
+                        .show(ui, |ui| {
+                            for i in 0..inv_size {
+                                egui::Frame::canvas(ui.style())
+                                    .inner_margin(2.0)
+                                    .show(ui, |ui| {
+                                        let (rect, response) = ui.allocate_exact_size(
+                                            egui::Vec2::splat(60.0),
+                                            egui::Sense::click(),
+                                        );
+                                        if response.clicked() {
+                                            clicked = Some(i + 1); // 0 is air
+                                        }
+                                        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                                            rect,
+                                            CustomBlockCallback { block_type: i },
+                                        ));
+                                    });
+                                if (i + 1) % 8 == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                });
+        });
+    clicked
+}
+
+pub fn draw_hotbar(
+    ctx: &egui::Context,
+    hotbar: &[u32; 8],
+    selected_slot: usize,
+    center: egui::Pos2,
+    screen_height: f32,
+) {
+    for i in 0..8 {
+        egui::Area::new(egui::Id::new(format!("inv_slot {}", i)))
+            .fixed_pos(egui::pos2(
+                center.x - 64.0 * (8.0_f32 / 2.0) + 64.0 * i as f32,
+                screen_height - 60.0,
+            ))
+            .show(ctx, |ui| {
+                let is_selected = selected_slot == i;
+                let mut frame = egui::Frame::canvas(ui.style());
+                if is_selected {
+                    frame = frame.stroke(egui::Stroke::new(3.0, egui::Color32::WHITE));
+                }
+                frame.show(ui, |ui| {
+                    let (rect, _response) =
+                        ui.allocate_exact_size(egui::Vec2::splat(55.0), egui::Sense::empty());
+                    ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                        rect,
+                        // 0 is air
+                        CustomBlockCallback {
+                            block_type: hotbar[i].saturating_sub(1),
+                        },
+                    ));
+                });
+            });
+    }
+}
+
+pub fn draw_crosshair(ctx: &egui::Context, center: egui::Pos2) {
+    let crosshair_size = 10.0;
+    let crosshair_thickness = 2.0;
+    let crosshair_color = egui::Color32::WHITE;
+
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("crosshair"),
+    ));
+
+    painter.line_segment(
+        [
+            egui::pos2(center.x - crosshair_size, center.y),
+            egui::pos2(center.x + crosshair_size, center.y),
+        ],
+        egui::Stroke::new(crosshair_thickness, crosshair_color),
+    );
+
+    painter.line_segment(
+        [
+            egui::pos2(center.x, center.y - crosshair_size),
+            egui::pos2(center.x, center.y + crosshair_size),
+        ],
+        egui::Stroke::new(crosshair_thickness, crosshair_color),
+    );
+}

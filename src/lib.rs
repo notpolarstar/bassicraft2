@@ -1060,6 +1060,71 @@ impl State {
         }
     }
 
+    fn handle_multiplayer_action(&mut self, action: gui::MultiplayerAction) {
+        match action {
+            gui::MultiplayerAction::Host { port } => {
+                #[cfg(not(target_arch = "wasm32"))]
+                match network::NetServer::start(port) {
+                    Ok(server) => {
+                        self.multiplayer_panel.lan_address = Some(server.lan_address.clone());
+                        self.multiplayer_panel.status = format!("Hosting on port {}", port);
+                        self.multiplayer_panel.is_hosting = true;
+                        match network::NetClient::connect(&format!("ws://127.0.0.1:{}", port)) {
+                            Ok(client) => { self.net_client = Some(client); }
+                            Err(e) => log::error!("Host self-connect failed: {}", e),
+                        }
+                        self.net_server = Some(server);
+                        if let Some(srv) = &self.net_server {
+                            let positions: Vec<[i32; 2]> = self.world.chunks.iter().map(|c| c.pos).collect();
+                            srv.broadcast(&network::ServerMessage::AvailableChunks(positions));
+                        }
+                    }
+                    Err(e) => {
+                        self.multiplayer_panel.status = format!("Host failed: {}", e);
+                    }
+                }
+            }
+            gui::MultiplayerAction::Join { url } => {
+                match network::NetClient::connect(&url) {
+                    Ok(client) => {
+                        self.net_client = Some(client);
+                        self.multiplayer_panel.status = format!("Connecting to {}\u{2026}", url);
+                    }
+                    Err(e) => {
+                        self.multiplayer_panel.status = format!("Connect failed: {}", e);
+                    }
+                }
+            }
+            gui::MultiplayerAction::Disconnect => {
+                self.net_client = None;
+                #[cfg(not(target_arch = "wasm32"))]
+                { self.net_server = None; }
+                self.ecs_world.clear_remote_entities();
+                self.multiplayer_panel.is_connected = false;
+                self.multiplayer_panel.is_hosting  = false;
+                self.multiplayer_panel.lan_address = None;
+                self.multiplayer_panel.status      = "Disconnected".to_string();
+            }
+            gui::MultiplayerAction::RequestChunks => {
+                let msg = std::mem::take(&mut self.multiplayer_panel.chat_input);
+                if !msg.is_empty() {
+                    if let Some(client) = &self.net_client {
+                        client.send(&network::ClientMessage::Chat { message: msg });
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(server) = &self.net_server {
+                        let my_id = self.net_client.as_ref().and_then(|c| c.my_id).unwrap_or(0);
+                        server.broadcast(&network::ServerMessage::Chat {
+                            sender_id: my_id,
+                            message: std::mem::take(&mut self.multiplayer_panel.chat_input),
+                        });
+                    }
+                }
+            }
+            gui::MultiplayerAction::None => {}
+        }
+    }
+
     fn network_tick(&mut self) {
         if let Some(client) = &self.net_client {
             let cam = &self.player.camera;
@@ -1404,7 +1469,9 @@ impl State {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: self.window.scale_factor() as f32,
         };
-        
+
+        let mut pending_mp_action = gui::MultiplayerAction::None;
+
         self.egui_renderer.draw(
             &self.device,
             &self.queue,
@@ -1418,197 +1485,43 @@ impl State {
                 let center = screen_rect.center();
 
                 if !self.player.cursor_locked {
-                    egui::Window::new("Bassicraft")
-                        .default_pos([10.0, 10.0])
-                        .show(ctx, |ui| {
-                            ui.heading("Game Stats");
-                            ui.separator();
-                            ui.label(format!("Position: {:.1}, {:.1}, {:.1}", 
-                                self.player.camera.position.x,
-                                self.player.camera.position.y,
-                                self.player.camera.position.z
-                            ));
-                            let dir = self.player.camera.direction();
-                            ui.label(format!("Direction: {:.2}, {:.2}, {:.2}",
-                                dir.x, dir.y, dir.z
-                            ));
-                            ui.label(format!("Selected block: {}",
-                                self.player.selected_block
-                            ));
-                            ui.separator();
-                            ui.label(format!("Chunks loaded: {}", self.world.chunks.len()));
-                            ui.separator();
-                            ui.label("Controls:");
-                            ui.label("  WASD - Move");
-                            ui.label("  Space - Jump");
-                            ui.label("  Mouse - Look around");
-                            ui.label("  Left Click - Break block");
-                            ui.label("  Right Click - Place block");
-                            ui.label("  P - Toggle cursor lock");
-                            ui.label("  ESC - Exit");
-                            ui.separator();
-                            ui.label(format!("Cursor: {}", if self.player.cursor_locked { "Locked" } else { "Unlocked" }));
+                    let dir = self.player.camera.direction();
+                    gui::draw_stats_window(ctx, &gui::GameStats {
+                        pos_x: self.player.camera.position.x,
+                        pos_y: self.player.camera.position.y,
+                        pos_z: self.player.camera.position.z,
+                        dir_x: dir.x,
+                        dir_y: dir.y,
+                        dir_z: dir.z,
+                        selected_block: self.player.selected_block,
+                        chunks_loaded: self.world.chunks.len(),
+                        cursor_locked: self.player.cursor_locked,
+                    });
 
-                            // ui.add(egui::Image::new(egui::include_image!("../res/texture_atlas.png")));
-                        });
-
-                    let mp_action = self.multiplayer_panel.draw(ctx);
-                    match mp_action {
-                        gui::MultiplayerAction::Host { port } => {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            match network::NetServer::start(port) {
-                                Ok(server) => {
-                                    self.multiplayer_panel.lan_address = Some(server.lan_address.clone());
-                                    self.multiplayer_panel.status = format!("Hosting on port {}", port);
-                                    self.multiplayer_panel.is_hosting = true;
-                                    match network::NetClient::connect(&format!("ws://127.0.0.1:{}", port)) {
-                                        Ok(client) => { self.net_client = Some(client); }
-                                        Err(e) => log::error!("Host self-connect failed: {}", e),
-                                    }
-                                    self.net_server = Some(server);
-                                    if let Some(srv) = &self.net_server {
-                                        let positions: Vec<[i32; 2]> = self.world.chunks.iter().map(|c| c.pos).collect();
-                                        srv.broadcast(&network::ServerMessage::AvailableChunks(positions));
-                                    }
-                                }
-                                Err(e) => {
-                                    self.multiplayer_panel.status = format!("Host failed: {}", e);
-                                }
-                            }
-                        }
-                        gui::MultiplayerAction::Join { url } => {
-                            match network::NetClient::connect(&url) {
-                                Ok(client) => {
-                                    self.net_client = Some(client);
-                                    self.multiplayer_panel.status = format!("Connecting to {}…", url);
-                                }
-                                Err(e) => {
-                                    self.multiplayer_panel.status = format!("Connect failed: {}", e);
-                                }
-                            }
-                        }
-                        gui::MultiplayerAction::Disconnect => {
-                            self.net_client = None;
-                            #[cfg(not(target_arch = "wasm32"))]
-                            { self.net_server = None; }
-                            self.ecs_world.clear_remote_entities();
-                            self.multiplayer_panel.is_connected = false;
-                            self.multiplayer_panel.is_hosting  = false;
-                            self.multiplayer_panel.lan_address = None;
-                            self.multiplayer_panel.status      = "Disconnected".to_string();
-                        }
-                        gui::MultiplayerAction::RequestChunks => {
-                            let msg = std::mem::take(&mut self.multiplayer_panel.chat_input);
-                            if !msg.is_empty() {
-                                if let Some(client) = &self.net_client {
-                                    client.send(&network::ClientMessage::Chat { message: msg });
-                                }
-                                #[cfg(not(target_arch = "wasm32"))]
-                                if let Some(server) = &self.net_server {
-                                    let my_id = self.net_client.as_ref().and_then(|c| c.my_id).unwrap_or(0);
-                                    server.broadcast(&network::ServerMessage::Chat {
-                                        sender_id: my_id,
-                                        message: std::mem::take(&mut self.multiplayer_panel.chat_input),
-                                    });
-                                }
-                            }
-                        }
-                        gui::MultiplayerAction::None => {}
-                    }
-                    }
+                    pending_mp_action = self.multiplayer_panel.draw(ctx);
+                }
 
                 if self.player.show_inventory {
-                    egui::Window::new("Inventory")
-                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                        .resizable(false)
-                        .collapsible(false)
-                        .show(ctx, |ui| {
-                            ui.add_space(5.0);
-                            egui::ScrollArea::vertical()
-                                .max_height(500.0)
-                                .show(ui, |ui| {
-                                    egui::Grid::new("Inventory")
-                                        .num_columns(8)
-                                        .spacing([5.0, 5.0])
-                                        .show(ui, |ui| {
-                                            for i in 0..INV_SIZE {
-                                                egui::Frame::canvas(ui.style())
-                                                    .inner_margin(2.0)
-                                                    .show(ui, |ui| {
-                                                        let (rect, response) = ui.allocate_exact_size(
-                                                            egui::Vec2::splat(60.0), 
-                                                            egui::Sense::click()
-                                                        );
-                                                        
-                                                        if response.clicked() {
-                                                            // 0 is air
-                                                            self.player.set_hotbar_slot(i + 1);
-                                                        }
+                    if let Some(slot) = gui::draw_inventory_window(ctx, INV_SIZE) {
+                        self.player.set_hotbar_slot(slot);
+                    }
+                }
 
-                                                        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                                                            rect,
-                                                            gui::CustomBlockCallback { block_type: i },
-                                                        ));
-                                                    });
-                                                if (i + 1) % 8 == 0 {
-                                                    ui.end_row();
-                                                }
-                                            }
-                                        });
-                                });
-                        });
-                }
-                
-                for i in 0..8 {
-                    egui::Area::new(egui::Id::new(format!("inv_slot {}", i)))
-                        .fixed_pos(egui::pos2(center.x - 64.0 * (8 as f32 / 2.0) + 64.0 * i as f32, screen_size.y - 60.0))
-                        .show(ctx, |ui| {
-                            let is_selected = self.player.selected_hotbar_slot == i;
-                            let mut frame = egui::Frame::canvas(ui.style());
-                            
-                            if is_selected {
-                                frame = frame.stroke(egui::Stroke::new(3.0, egui::Color32::WHITE));
-                            }
-                            
-                            frame.show(ui, |ui| {
-                                let (rect, _response) = ui.allocate_exact_size(egui::Vec2::splat(55.0), egui::Sense::empty());
-                                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                                    rect,
-                                    // 0 is air
-                                    gui::CustomBlockCallback { block_type: self.player.hotbar[i].saturating_sub(1) },
-                                ));
-                            });
-                    });
-                }
+                gui::draw_hotbar(
+                    ctx,
+                    &self.player.hotbar,
+                    self.player.selected_hotbar_slot,
+                    center,
+                    screen_size.y,
+                );
 
                 if self.player.cursor_locked {
-                    let crosshair_size = 10.0;
-                    let crosshair_thickness = 2.0;
-                    let crosshair_color = egui::Color32::WHITE;
-                    
-                    let painter = ctx.layer_painter(egui::LayerId::new(
-                        egui::Order::Foreground,
-                        egui::Id::new("crosshair"),
-                    ));
-    
-                    painter.line_segment(
-                        [
-                            egui::pos2(center.x - crosshair_size, center.y),
-                            egui::pos2(center.x + crosshair_size, center.y),
-                        ],
-                        egui::Stroke::new(crosshair_thickness, crosshair_color),
-                    );
-    
-                    painter.line_segment(
-                        [
-                            egui::pos2(center.x, center.y - crosshair_size),
-                            egui::pos2(center.x, center.y + crosshair_size),
-                        ],
-                        egui::Stroke::new(crosshair_thickness, crosshair_color),
-                    );
+                    gui::draw_crosshair(ctx, center);
                 }
             },
         );
+
+        self.handle_multiplayer_action(pending_mp_action);
 
         self.queue.submit(iter::once(encoder.finish()));
         output.present();
