@@ -1058,6 +1058,13 @@ impl State {
             self.net_tick_accumulator = 0.0;
             self.network_tick();
         }
+
+        let player_pos = &self.player.camera.position;
+        let player_chunk = [
+            (player_pos.x / chunk::CHUNK_X_SIZE as f32).floor() as i32,
+            (player_pos.z / chunk::CHUNK_Z_SIZE as f32).floor() as i32,
+        ];
+        self.world.update_chunks(&self.device, &self.queue, player_chunk);
     }
 
     fn handle_multiplayer_action(&mut self, action: gui::MultiplayerAction) {
@@ -1486,6 +1493,7 @@ impl State {
 
                 if !self.player.cursor_locked {
                     let dir = self.player.camera.direction();
+                    let chunks_loaded = self.world.chunks.len();
                     gui::draw_stats_window(ctx, &gui::GameStats {
                         pos_x: self.player.camera.position.x,
                         pos_y: self.player.camera.position.y,
@@ -1494,9 +1502,9 @@ impl State {
                         dir_y: dir.y,
                         dir_z: dir.z,
                         selected_block: self.player.selected_block,
-                        chunks_loaded: self.world.chunks.len(),
+                        chunks_loaded,
                         cursor_locked: self.player.cursor_locked,
-                    });
+                    }, &mut self.world.render_distance);
 
                     pending_mp_action = self.multiplayer_panel.draw(ctx);
                 }
@@ -1536,6 +1544,21 @@ impl State {
             } else {
                 self.lock_cursor();
             }
+            return;
+        }
+
+        if code == KeyCode::KeyX && is_pressed {
+            let pos = self.ecs_world.get_player_position().unwrap_or_else(|| {
+                let p = &self.player.camera.position;
+                cgmath::Vector3::new(p.x, p.y, p.z)
+            });
+            let net_id = self.ecs_world.alloc_net_id();
+            ecs::spawn_following_mob(
+                &mut self.ecs_world.world,
+                pos,
+                "Creeper.obj".to_string(),
+                net_id,
+            );
             return;
         }
         

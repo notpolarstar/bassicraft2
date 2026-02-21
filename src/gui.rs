@@ -382,7 +382,7 @@ pub struct GameStats {
     pub cursor_locked: bool,
 }
 
-pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats) {
+pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats, render_distance: &mut i32) {
     egui::Window::new("Bassicraft")
         .default_pos([10.0, 10.0])
         .show(ctx, |ui| {
@@ -399,6 +399,11 @@ pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats) {
             ui.label(format!("Selected block: {}", stats.selected_block));
             ui.separator();
             ui.label(format!("Chunks loaded: {}", stats.chunks_loaded));
+            ui.horizontal(|ui| {
+                ui.label("Render distance:");
+                let max_rd: i32 = if cfg!(target_arch = "wasm32") { 6 } else { 16 };
+                ui.add(egui::Slider::new(render_distance, 1..=max_rd).suffix(" chunks"));
+            });
             ui.separator();
             ui.label("Controls:");
             ui.label("  WASD - Move");
@@ -406,6 +411,7 @@ pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats) {
             ui.label("  Mouse - Look around");
             ui.label("  Left Click - Break block");
             ui.label("  Right Click - Place block");
+            ui.label("  M - Spawn following mob");
             ui.label("  P - Toggle cursor lock");
             ui.label("  ESC - Exit");
             ui.separator();

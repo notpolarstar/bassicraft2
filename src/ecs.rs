@@ -330,14 +330,36 @@ impl EcsWorld {
                 let right_dir = Vector3::new(-camera_yaw.sin(), 0.0, camera_yaw.cos());
 
                 let move_dir = forward_dir * forward + right_dir * right;
-                if move_dir.magnitude2() > 0.01 {
-                    let normalized = move_dir.normalize();
-                    physics.velocity.x = normalized.x * input.movement_speed;
-                    physics.velocity.z = normalized.z * input.movement_speed;
+
+                let is_jumping = input.jump && physics.on_ground;
+                if is_jumping {
+                    physics.velocity.y = 8.0;
+                    physics.on_ground = false;
                 }
 
-                if input.jump && physics.on_ground {
-                    physics.velocity.y = 8.0;
+                if physics.on_ground {
+                    if move_dir.magnitude2() > 0.01 {
+                        let normalized = move_dir.normalize();
+                        physics.velocity.x = normalized.x * input.movement_speed;
+                        physics.velocity.z = normalized.z * input.movement_speed;
+                    }
+                    physics.friction = 0.85;
+                } else {
+                    if move_dir.magnitude2() > 0.01 {
+                        let wish_dir = move_dir.normalize();
+                        const AIR_ACCEL: f32 = 3.0;
+                        const MAX_AIR_WISH_SPEED: f32 = 5.5;
+                        let accel_speed = AIR_ACCEL * MAX_AIR_WISH_SPEED * dt;
+
+                        let current_speed = physics.velocity.x * wish_dir.x
+                            + physics.velocity.z * wish_dir.z;
+                        let add_speed = (MAX_AIR_WISH_SPEED - current_speed).min(accel_speed);
+                        if add_speed > 0.0 {
+                            physics.velocity.x += wish_dir.x * add_speed;
+                            physics.velocity.z += wish_dir.z * add_speed;
+                        }
+                    }
+                    physics.friction = 1.0;
                 }
             }
         }
