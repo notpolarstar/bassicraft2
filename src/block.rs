@@ -117,7 +117,7 @@ pub struct Block {
 }
 
 // TEMP, MAKE ACTUAL CORRECT BLOCK LOADING SYSTEM LATER FOR "SPECIAL" BLOCKS (DOORS, STAIRS, SHRUBS, FLOWERS, ...) INSTEAD OF HARDCODING EVERYTHING >:(
-const NON_SOLID_BLOCKS: &[BlockType] = &[0, 12, 29, 30, 31, 39, 40, 50, 53, 56, 57, 64];
+const NON_SOLID_BLOCKS: &[BlockType] = &[0, 12, 29, 30, 31, 39, 40, 50, 53, 56, 57, 64, 208];
 
 impl Block {
     pub fn new(mat: BlockType, close_blocks: [bool; 6]) -> Self {

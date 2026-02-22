@@ -87,10 +87,10 @@ impl TextureAtlas {
         let tex_size = BLOCK_TEXTURE_SIZE_TOTAL;
 
         [
+            [x * tex_size,         (y + 1.0) * tex_size],
             [x * tex_size,         y * tex_size],
             [(x + 1.0) * tex_size, y * tex_size],
             [(x + 1.0) * tex_size, (y + 1.0) * tex_size],
-            [x * tex_size,         (y + 1.0) * tex_size],
         ]
     }
 }
