@@ -56,7 +56,7 @@ fn fs_main(in: VertexOutput) -> FragOutput {
 
     var out: FragOutput;
     out.accum  = vec4<f32>(color.rgb * alpha * w, alpha * w);
-    out.reveal = vec4<f32>(0.0, 0.0, 0.0, alpha);
+    out.reveal = vec4<f32>(-log(1.0 - clamp(alpha, 0.001, 0.999)), 0.0, 0.0, 0.0);
 
     return out;
 }

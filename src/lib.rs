@@ -214,7 +214,7 @@ fn create_wboit_textures(
     width: u32,
     height: u32,
 ) -> (wgpu::Texture, wgpu::TextureView, wgpu::Texture, wgpu::TextureView) {
-    let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+    let size = wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 };
 
     let accum_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("WBOIT Accum Texture"),
@@ -234,7 +234,7 @@ fn create_wboit_textures(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R8Unorm,
+        format: wgpu::TextureFormat::Rgba16Float,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
@@ -247,8 +247,8 @@ impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<State> {
         let size = window.inner_size();
         let max_size = 2048;
-        let width = size.width.min(max_size);
-        let height = size.height.min(max_size);
+        let width = size.width.min(max_size).max(1);
+        let height = size.height.min(max_size).max(1);
 
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
@@ -436,11 +436,15 @@ impl State {
 
         let reveal_blend = wgpu::BlendState {
             color: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::Zero,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
                 operation: wgpu::BlendOperation::Add,
             },
-            alpha: wgpu::BlendComponent::REPLACE,
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
         };
 
         let render_pipeline_layout =
@@ -525,9 +529,9 @@ impl State {
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                     Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R8Unorm,
+                        format: wgpu::TextureFormat::Rgba16Float,
                         blend: Some(reveal_blend),
-                        write_mask: wgpu::ColorWrites::RED,
+                        write_mask: wgpu::ColorWrites::ALL,
                     }),
                 ],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -1775,7 +1779,7 @@ impl State {
                         view: &self.wboit_reveal_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                             store: wgpu::StoreOp::Store,
                         },
                         depth_slice: None,

@@ -31,7 +31,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let accum_sample  = textureSample(t_accum,  s_wboit, in.tex_coords);
     let reveal_sample = textureSample(t_reveal, s_wboit, in.tex_coords);
 
-    let transmittance = reveal_sample.r;
+    let transmittance = exp(-reveal_sample.r);
 
     if transmittance > 0.9999 {
         discard;
