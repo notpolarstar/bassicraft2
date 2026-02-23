@@ -197,6 +197,50 @@ pub struct State {
     net_server: Option<network::NetServer>,
     multiplayer_panel: gui::MultiplayerPanel,
     net_tick_accumulator: f32,
+
+    wboit_accum_texture: wgpu::Texture,
+    wboit_reveal_texture: wgpu::Texture,
+    wboit_accum_view: wgpu::TextureView,
+    wboit_reveal_view: wgpu::TextureView,
+
+    wboit_pipeline: wgpu::RenderPipeline,
+    composite_pipeline: wgpu::RenderPipeline,
+    composite_bind_group: wgpu::BindGroup,
+    composite_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+fn create_wboit_textures(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView, wgpu::Texture, wgpu::TextureView) {
+    let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+
+    let accum_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("WBOIT Accum Texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let accum_view = accum_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let reveal_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("WBOIT Reveal Texture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let reveal_view = reveal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    (accum_texture, accum_view, reveal_texture, reveal_view)
 }
 
 impl State {
@@ -377,6 +421,28 @@ impl State {
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
+        let accum_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+
+        let reveal_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent::REPLACE,
+        };
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -433,6 +499,180 @@ impl State {
             multiview: None,
             cache: None,
         });
+
+        let (wboit_accum_texture, wboit_accum_view, wboit_reveal_texture, wboit_reveal_view) =
+            create_wboit_textures(&device, width, height);
+
+        let transparent_shader =
+            device.create_shader_module(wgpu::include_wgsl!("transparent_shader.wgsl"));
+
+        let wboit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("WBOIT Transparent Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &transparent_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[block::BlockVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &transparent_shader,
+                entry_point: Some("fs_main"),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(accum_blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R8Unorm,
+                        blend: Some(reveal_blend),
+                        write_mask: wgpu::ColorWrites::RED,
+                    }),
+                ],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        let composite_shader =
+            device.create_shader_module(wgpu::include_wgsl!("composite_shader.wgsl"));
+
+        let wboit_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("WBOIT Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let composite_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("WBOIT Composite BGL"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("WBOIT Composite BG"),
+            layout: &composite_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&wboit_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&wboit_accum_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&wboit_reveal_view),
+                },
+            ],
+        });
+
+        let composite_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("WBOIT Composite Pipeline Layout"),
+                bind_group_layouts: &[&composite_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let composite_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("WBOIT Composite Pipeline"),
+                layout: Some(&composite_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &composite_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &composite_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent::REPLACE,
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
@@ -671,39 +911,41 @@ impl State {
         for block_type in 0..INV_SIZE {
             let tex_x = (block_type % 16) as f32 / 16.0;
             let tex_y = (block_type / 16) as f32 / 16.0;
-            let tex_coords = [tex_x, tex_y, tex_x + 0.0625, tex_y + 0.0625];
+            // 0.5 / atlas_px (256 px atlas) BAD HARDCODED FIX LATER
+            let half = 0.5 / (16.0 * 16.0_f32);
+            let tex_coords = [tex_x + half, tex_y + half, tex_x + 0.0625 - half, tex_y + 0.0625 - half];
             
             let vertices = vec![
                 // Front face
-                BlockVertex { position: [-0.5, -0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
-                BlockVertex { position: [ 0.5, -0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
-                BlockVertex { position: [ 0.5,  0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
-                BlockVertex { position: [-0.5,  0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                BlockVertex { position: [-0.5, -0.5,  0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[1], false) },
+                BlockVertex { position: [-0.5,  0.5,  0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[1], false) },
                 // Back face
-                BlockVertex { position: [ 0.5, -0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
-                BlockVertex { position: [-0.5, -0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
-                BlockVertex { position: [-0.5,  0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
-                BlockVertex { position: [ 0.5,  0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[3], false) },
+                BlockVertex { position: [-0.5, -0.5, -0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[3], false) },
+                BlockVertex { position: [-0.5,  0.5, -0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[1], false) },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[1], false) },
                 // Left face
-                BlockVertex { position: [-0.5, -0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
-                BlockVertex { position: [-0.5, -0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
-                BlockVertex { position: [-0.5,  0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
-                BlockVertex { position: [-0.5,  0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                BlockVertex { position: [-0.5, -0.5, -0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[3], false) },
+                BlockVertex { position: [-0.5, -0.5,  0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[3], false) },
+                BlockVertex { position: [-0.5,  0.5,  0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[1], false) },
+                BlockVertex { position: [-0.5,  0.5, -0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[1], false) },
                 // Right face
-                BlockVertex { position: [ 0.5, -0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
-                BlockVertex { position: [ 0.5, -0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
-                BlockVertex { position: [ 0.5,  0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
-                BlockVertex { position: [ 0.5,  0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[1], false) },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[1], false) },
                 // Top face
-                BlockVertex { position: [-0.5,  0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
-                BlockVertex { position: [ 0.5,  0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
-                BlockVertex { position: [ 0.5,  0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
-                BlockVertex { position: [-0.5,  0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                BlockVertex { position: [-0.5,  0.5,  0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[1], false) },
+                BlockVertex { position: [-0.5,  0.5, -0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[1], false) },
                 // Bottom face
-                BlockVertex { position: [-0.5, -0.5, -0.5], tex_coords: [tex_coords[0], tex_coords[3]] },
-                BlockVertex { position: [ 0.5, -0.5, -0.5], tex_coords: [tex_coords[2], tex_coords[3]] },
-                BlockVertex { position: [ 0.5, -0.5,  0.5], tex_coords: [tex_coords[2], tex_coords[1]] },
-                BlockVertex { position: [-0.5, -0.5,  0.5], tex_coords: [tex_coords[0], tex_coords[1]] },
+                BlockVertex { position: [-0.5, -0.5, -0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[3], false) },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], packed: BlockVertex::pack(tex_coords[2], tex_coords[1], false) },
+                BlockVertex { position: [-0.5, -0.5,  0.5], packed: BlockVertex::pack(tex_coords[0], tex_coords[1], false) },
             ];
             
             let indices: Vec<u32> = (0..6)
@@ -831,6 +1073,14 @@ impl State {
             net_server: None,
             multiplayer_panel: gui::MultiplayerPanel::default(),
             net_tick_accumulator: 0.0,
+            wboit_accum_texture,
+            wboit_reveal_texture,
+            wboit_accum_view,
+            wboit_reveal_view,
+            wboit_pipeline,
+            composite_pipeline,
+            composite_bind_group,
+            composite_bind_group_layout,
             // cursor_locked: false,
         })
     }
@@ -850,6 +1100,42 @@ impl State {
 
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+
+            let (accum_tex, accum_view, reveal_tex, reveal_view) =
+                create_wboit_textures(&self.device, width, height);
+            self.wboit_accum_texture  = accum_tex;
+            self.wboit_accum_view     = accum_view;
+            self.wboit_reveal_texture = reveal_tex;
+            self.wboit_reveal_view    = reveal_view;
+
+            let wboit_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("WBOIT Sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            });
+
+            self.composite_bind_group =
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("WBOIT Composite BG"),
+                    layout: &self.composite_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Sampler(&wboit_sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&self.wboit_accum_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&self.wboit_reveal_view),
+                        },
+                    ],
+                });
         }
     }
 
@@ -1470,6 +1756,85 @@ impl State {
                     }
                 }
             }
+        }
+
+        {
+            let mut wboit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("WBOIT Transparent Pass"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.wboit_accum_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.wboit_reveal_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    }),
+                ],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+
+            wboit_pass.set_pipeline(&self.wboit_pipeline);
+            wboit_pass.set_bind_group(0, &self.world.texture_atlas.diffuse_bind_group, &[]);
+            wboit_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+
+            self.world
+                .chunk_buffers
+                .iter()
+                .filter(|cb| {
+                    cb.vertex_buffer.size() > 0
+                        && cb.transparent_num_elements > 0
+                        && cb.transparent_indices_buffer.is_some()
+                })
+                .for_each(|cb| {
+                    wboit_pass.set_vertex_buffer(0, cb.vertex_buffer.slice(..));
+                    wboit_pass.set_index_buffer(
+                        cb.transparent_indices_buffer.as_ref().unwrap().slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    wboit_pass.draw_indexed(0..cb.transparent_num_elements, 0, 0..1);
+                });
+        }
+
+        {
+            let mut composite_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("WBOIT Composite Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+
+            composite_pass.set_pipeline(&self.composite_pipeline);
+            composite_pass.set_bind_group(0, &self.composite_bind_group, &[]);
+            composite_pass.draw(0..3, 0..1);
         }
 
         let screen_descriptor = egui_wgpu::ScreenDescriptor {

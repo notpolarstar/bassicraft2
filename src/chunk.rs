@@ -18,6 +18,8 @@ pub struct Mesh {
     pub vertices: Vec<BlockVertex>,
     pub indices: Vec<u32>,
     pub num_elements: u32,
+    pub transparent_indices: Vec<u32>,
+    pub transparent_num_elements: u32,
 }
 
 impl Mesh {
@@ -34,6 +36,7 @@ impl Mesh {
         let est_faces = solid_count * 3;
         let mut vertices = Vec::with_capacity(est_faces * 4);
         let mut indices = Vec::with_capacity(est_faces * 6);
+        let mut transparent_indices: Vec<u32> = Vec::new();
         let mut vert_count: u32 = 0;
 
         let chunk_ox = CHUNK_X_SIZE as f32 * pos[0] as f32;
@@ -53,96 +56,130 @@ impl Mesh {
                     let oy = y as f32;
                     let oz = z as f32 + chunk_oz;
 
+                    let is_fluid = Block::is_blocktype_fluid(mat);
+
                     // BACK (−z)
-                    let back_solid = if z == 0 {
-                        back_blocks
-                            .and_then(|b| b.get(x)?.get(y).copied())
-                            .map(Block::is_blocktype_solid)
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(block_types[block_index(x, y, z - 1)])
-                    };
-                    if !back_solid {
-                        emit_face(
-                            &mut vertices,
-                            &mut indices,
-                            &face_indices,
-                            &mut vert_count,
-                            FaceDirections::BACK,
-                            mat,
-                            ox,
-                            oy,
-                            oz,
-                        );
-                    }
+                    if !is_fluid {
+                        let back_solid = if z == 0 {
+                            back_blocks
+                                .and_then(|b| b.get(x)?.get(y).copied())
+                                .map(Block::is_blocktype_solid)
+                                .unwrap_or(false)
+                        } else {
+                            Block::is_blocktype_solid(block_types[block_index(x, y, z - 1)])
+                        };
+                        if !back_solid {
+                            emit_face(
+                                &mut vertices,
+                                &mut indices,
+                                &mut transparent_indices,
+                                &face_indices,
+                                &mut vert_count,
+                                FaceDirections::BACK,
+                                mat,
+                                ox,
+                                oy,
+                                oz,
+                                0,
+                            );
+                        }
 
-                    // FRONT (+z)
-                    let front_solid = if z == CHUNK_Z_SIZE - 1 {
-                        front_blocks
-                            .and_then(|b| b.get(x)?.get(y).copied())
-                            .map(Block::is_blocktype_solid)
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(block_types[block_index(x, y, z + 1)])
-                    };
-                    if !front_solid {
-                        emit_face(
-                            &mut vertices,
-                            &mut indices,
-                            &face_indices,
-                            &mut vert_count,
-                            FaceDirections::FRONT,
-                            mat,
-                            ox,
-                            oy,
-                            oz,
-                        );
-                    }
+                        // FRONT (+z)
+                        let front_solid = if z == CHUNK_Z_SIZE - 1 {
+                            front_blocks
+                                .and_then(|b| b.get(x)?.get(y).copied())
+                                .map(Block::is_blocktype_solid)
+                                .unwrap_or(false)
+                        } else {
+                            Block::is_blocktype_solid(block_types[block_index(x, y, z + 1)])
+                        };
+                        if !front_solid {
+                            emit_face(
+                                &mut vertices,
+                                &mut indices,
+                                &mut transparent_indices,
+                                &face_indices,
+                                &mut vert_count,
+                                FaceDirections::FRONT,
+                                mat,
+                                ox,
+                                oy,
+                                oz,
+                                0,
+                            );
+                        }
 
-                    // LEFT (−x)
-                    let left_solid = if x == 0 {
-                        left_blocks
-                            .and_then(|b| b.get(z)?.get(y).copied())
-                            .map(Block::is_blocktype_solid)
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(block_types[block_index(x - 1, y, z)])
-                    };
-                    if !left_solid {
-                        emit_face(
-                            &mut vertices,
-                            &mut indices,
-                            &face_indices,
-                            &mut vert_count,
-                            FaceDirections::LEFT,
-                            mat,
-                            ox,
-                            oy,
-                            oz,
-                        );
-                    }
+                        // LEFT (−x)
+                        let left_solid = if x == 0 {
+                            left_blocks
+                                .and_then(|b| b.get(z)?.get(y).copied())
+                                .map(Block::is_blocktype_solid)
+                                .unwrap_or(false)
+                        } else {
+                            Block::is_blocktype_solid(block_types[block_index(x - 1, y, z)])
+                        };
+                        if !left_solid {
+                            emit_face(
+                                &mut vertices,
+                                &mut indices,
+                                &mut transparent_indices,
+                                &face_indices,
+                                &mut vert_count,
+                                FaceDirections::LEFT,
+                                mat,
+                                ox,
+                                oy,
+                                oz,
+                                0,
+                            );
+                        }
 
-                    // RIGHT (+x)
-                    let right_solid = if x == CHUNK_X_SIZE - 1 {
-                        right_blocks
-                            .and_then(|b| b.get(z)?.get(y).copied())
-                            .map(Block::is_blocktype_solid)
-                            .unwrap_or(false)
-                    } else {
-                        Block::is_blocktype_solid(block_types[block_index(x + 1, y, z)])
-                    };
-                    if !right_solid {
-                        emit_face(
-                            &mut vertices,
-                            &mut indices,
-                            &face_indices,
-                            &mut vert_count,
-                            FaceDirections::RIGHT,
-                            mat,
-                            ox,
-                            oy,
-                            oz,
-                        );
+                        // RIGHT (+x)
+                        let right_solid = if x == CHUNK_X_SIZE - 1 {
+                            right_blocks
+                                .and_then(|b| b.get(z)?.get(y).copied())
+                                .map(Block::is_blocktype_solid)
+                                .unwrap_or(false)
+                        } else {
+                            Block::is_blocktype_solid(block_types[block_index(x + 1, y, z)])
+                        };
+                        if !right_solid {
+                            emit_face(
+                                &mut vertices,
+                                &mut indices,
+                                &mut transparent_indices,
+                                &face_indices,
+                                &mut vert_count,
+                                FaceDirections::RIGHT,
+                                mat,
+                                ox,
+                                oy,
+                                oz,
+                                0,
+                            );
+                        }
+
+                        // BOTTOM (−y)
+                        let bot_solid = if y == 0 {
+                            false
+                        } else {
+                            Block::is_blocktype_solid(block_types[block_index(x, y - 1, z)])
+                        };
+                        if !bot_solid {
+                            emit_face(
+                                &mut vertices,
+                                &mut indices,
+                                &mut transparent_indices,
+                                &face_indices,
+                                &mut vert_count,
+                                FaceDirections::BOTTOM,
+                                mat,
+                                ox,
+                                oy,
+                                oz,
+                                0,
+                            );
+                        }
                     }
 
                     // TOP (+y)
@@ -151,10 +188,14 @@ impl Mesh {
                     } else {
                         Block::is_blocktype_solid(block_types[block_index(x, y + 1, z)])
                     };
-                    if !top_solid {
+                    let top_also_fluid = is_fluid
+                        && y < CHUNK_Y_SIZE - 1
+                        && Block::is_blocktype_fluid(block_types[block_index(x, y + 1, z)]);
+                    if !top_solid && !top_also_fluid {
                         emit_face(
                             &mut vertices,
                             &mut indices,
+                            &mut transparent_indices,
                             &face_indices,
                             &mut vert_count,
                             FaceDirections::TOP,
@@ -162,36 +203,20 @@ impl Mesh {
                             ox,
                             oy,
                             oz,
-                        );
-                    }
-
-                    // BOTTOM (−y)
-                    let bot_solid = if y == 0 {
-                        false
-                    } else {
-                        Block::is_blocktype_solid(block_types[block_index(x, y - 1, z)])
-                    };
-                    if !bot_solid {
-                        emit_face(
-                            &mut vertices,
-                            &mut indices,
-                            &face_indices,
-                            &mut vert_count,
-                            FaceDirections::BOTTOM,
-                            mat,
-                            ox,
-                            oy,
-                            oz,
+                            if is_fluid { 1 } else { 0 },
                         );
                     }
                 }
             }
         }
 
+        let transparent_num = transparent_indices.len() as u32;
         Self {
             num_elements: indices.len() as u32,
             vertices,
             indices,
+            transparent_indices,
+            transparent_num_elements: transparent_num,
         }
     }
 }
@@ -200,6 +225,7 @@ impl Mesh {
 fn emit_face(
     vertices: &mut Vec<BlockVertex>,
     indices: &mut Vec<u32>,
+    transparent_indices: &mut Vec<u32>,
     face_indices: &[u8; 6],
     vert_count: &mut u32,
     dir: FaceDirections,
@@ -207,16 +233,23 @@ fn emit_face(
     ox: f32,
     oy: f32,
     oz: f32,
+    is_transparent: u32,
 ) {
     let template = dir.get_verts(mat);
     for v in &template {
+        let packed = v.packed | (is_transparent << 20);
         vertices.push(BlockVertex {
             position: [v.position[0] + ox, v.position[1] + oy, v.position[2] + oz],
-            tex_coords: v.tex_coords,
+            packed,
         });
     }
+    let target = if is_transparent != 0 {
+        &mut *transparent_indices
+    } else {
+        &mut *indices
+    };
     for &i in face_indices {
-        indices.push(i as u32 + *vert_count);
+        target.push(i as u32 + *vert_count);
     }
     *vert_count += 4;
 }

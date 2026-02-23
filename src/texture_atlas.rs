@@ -85,12 +85,19 @@ impl TextureAtlas {
         let y = ((mat - 1) / TEXTURE_ATLAS_X_SIZE as u32) as f32;
 
         let tex_size = BLOCK_TEXTURE_SIZE_TOTAL;
+        let atlas_px = (TEXTURE_ATLAS_X_SIZE as f32) * (BLOCK_TEXTURE_SIZE as f32);
+        let half = 0.5 / atlas_px;
+
+        let u0 = x * tex_size + half;
+        let u1 = (x + 1.0) * tex_size - half;
+        let v0 = y * tex_size + half;
+        let v1 = (y + 1.0) * tex_size - half;
 
         [
-            [x * tex_size,         (y + 1.0) * tex_size],
-            [x * tex_size,         y * tex_size],
-            [(x + 1.0) * tex_size, y * tex_size],
-            [(x + 1.0) * tex_size, (y + 1.0) * tex_size],
+            [u0, v1],
+            [u0, v0],
+            [u1, v0],
+            [u1, v1],
         ]
     }
 }

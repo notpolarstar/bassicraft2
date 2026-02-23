@@ -9,20 +9,22 @@ var<uniform> camera: CameraUniform;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
-    @location(1) tex_coords: vec2<f32>,
+    @location(1) packed: u32,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) tex_coords: vec2<f32>,
+    @location(0)       tex_coords:    vec2<f32>,
 }
 
+const UV_MAX: f32 = 1023.0;
+
 @vertex
-fn vs_main(
-    model: VertexInput,
-) -> VertexOutput {
+fn vs_main(model: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.tex_coords = model.tex_coords;
+    let u = f32(model.packed & 0x3FFu) / UV_MAX;
+    let v = f32((model.packed >> 10u) & 0x3FFu) / UV_MAX;
+    out.tex_coords    = vec2<f32>(u, v);
     out.clip_position = camera.view_proj * vec4<f32>(model.position, 1.0);
     return out;
 }

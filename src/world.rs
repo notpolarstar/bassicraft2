@@ -157,8 +157,11 @@ pub struct ChunkBuffer {
     pub vertex_buffer: wgpu::Buffer,
     pub indices_buffer: wgpu::Buffer,
     pub num_elements: u32,
+    pub transparent_indices_buffer: Option<wgpu::Buffer>,
+    pub transparent_num_elements: u32,
     vertex_capacity: usize,
     index_capacity: usize,
+    transparent_index_capacity: usize,
 }
 
 impl ChunkBuffer {
@@ -167,9 +170,12 @@ impl ChunkBuffer {
         vertices: Vec<BlockVertex>,
         indices: Vec<u32>,
         num_elements: u32,
+        transparent_indices: Vec<u32>,
+        transparent_num_elements: u32,
     ) -> Self {
         let vertex_capacity = vertices.len();
         let index_capacity = indices.len();
+        let transparent_index_capacity = transparent_indices.len();
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("chunkbuffer vertex buffer"),
@@ -183,12 +189,25 @@ impl ChunkBuffer {
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
         });
 
+        let transparent_indices_buffer = if transparent_indices.is_empty() {
+            None
+        } else {
+            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("chunkbuffer transparent indices buffer"),
+                contents: bytemuck::cast_slice(&transparent_indices),
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            }))
+        };
+
         Self {
             vertex_buffer,
             indices_buffer,
             num_elements,
+            transparent_indices_buffer,
+            transparent_num_elements,
             vertex_capacity,
             index_capacity,
+            transparent_index_capacity,
         }
     }
 
@@ -199,6 +218,8 @@ impl ChunkBuffer {
         vertices: Vec<BlockVertex>,
         indices: Vec<u32>,
         num_elements: u32,
+        transparent_indices: Vec<u32>,
+        transparent_num_elements: u32,
     ) {
         if vertices.len() > self.vertex_capacity || indices.len() > self.index_capacity {
             self.vertex_capacity = (vertices.len() as f32 * 1.5) as usize;
@@ -226,6 +247,35 @@ impl ChunkBuffer {
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
         queue.write_buffer(&self.indices_buffer, 0, bytemuck::cast_slice(&indices));
         self.num_elements = num_elements;
+
+        if transparent_indices.is_empty() {
+            self.transparent_indices_buffer = None;
+            self.transparent_num_elements = 0;
+            self.transparent_index_capacity = 0;
+        } else {
+            let needs_new = transparent_indices.len() > self.transparent_index_capacity
+                || self.transparent_indices_buffer.is_none();
+            if needs_new {
+                self.transparent_index_capacity =
+                    (transparent_indices.len() as f32 * 1.5) as usize;
+                let buf_size =
+                    (self.transparent_index_capacity * std::mem::size_of::<u32>()) as u64;
+                self.transparent_indices_buffer = Some(device.create_buffer(
+                    &wgpu::BufferDescriptor {
+                        label: Some("chunkbuffer transparent indices buffer"),
+                        size: buf_size,
+                        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    },
+                ));
+            }
+            queue.write_buffer(
+                self.transparent_indices_buffer.as_ref().unwrap(),
+                0,
+                bytemuck::cast_slice(&transparent_indices),
+            );
+            self.transparent_num_elements = transparent_num_elements;
+        }
     }
 }
 
@@ -284,6 +334,8 @@ impl World {
                 std::mem::take(&mut chunks[i].mesh.vertices),
                 std::mem::take(&mut chunks[i].mesh.indices),
                 chunks[i].mesh.num_elements,
+                std::mem::take(&mut chunks[i].mesh.transparent_indices),
+                chunks[i].mesh.transparent_num_elements,
             );
             chunk_buffers.push(chunk_buffer);
         }
@@ -444,6 +496,8 @@ impl World {
                 std::mem::take(&mut chunk.mesh.vertices),
                 std::mem::take(&mut chunk.mesh.indices),
                 chunk.mesh.num_elements,
+                std::mem::take(&mut chunk.mesh.transparent_indices),
+                chunk.mesh.transparent_num_elements,
             );
             self.chunks.push(chunk);
             self.chunk_buffers.push(chunk_buffer);
@@ -598,6 +652,8 @@ impl World {
             std::mem::take(&mut self.chunks[chunk_index].mesh.vertices),
             std::mem::take(&mut self.chunks[chunk_index].mesh.indices),
             self.chunks[chunk_index].mesh.num_elements,
+            std::mem::take(&mut self.chunks[chunk_index].mesh.transparent_indices),
+            self.chunks[chunk_index].mesh.transparent_num_elements,
         );
     }
 }
