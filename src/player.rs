@@ -71,7 +71,7 @@ impl Player {
             for chunk in chunks {
                 if chunk.pos[0] == chunk_x && chunk.pos[1] == chunk_z {
                     if let Some(block) = chunk.get_block([local_x, local_y, local_z]) {
-                        if !block.is_air() {
+                        if !block.is_air() && !block.is_fluid() {
                             return Some(world_block_pos);
                         }
                     }
@@ -120,7 +120,7 @@ impl Player {
             for chunk in chunks {
                 if chunk.pos[0] == chunk_x && chunk.pos[1] == chunk_z {
                     if let Some(block) = chunk.get_block([local_x, local_y, local_z]) {
-                        if !block.is_air() {
+                        if !block.is_air() && !block.is_fluid() {
                             return last_empty_pos;
                         } else {
                             last_empty_pos = Some(world_block_pos);

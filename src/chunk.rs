@@ -543,9 +543,9 @@ impl Chunk {
         if x >= CHUNK_X_SIZE || y >= CHUNK_Y_SIZE || z >= CHUNK_Z_SIZE {
             return;
         }
-        if self.block_types[block_index(x, y, z)] != 0 {
-            return;
-        }
+        // if self.block_types[block_index(x, y, z)] != 0 {
+        //     return;
+        // }
         self.block_types[block_index(x, y, z)] = block_type;
         self.regenerate_mesh();
     }

@@ -238,6 +238,10 @@ impl Block {
         self.mat == 0
     }
 
+    pub fn is_fluid(&self) -> bool {
+        FLUID_BLOCKS.contains(&self.mat)
+    }
+
     pub fn is_blocktype_solid(mat: BlockType) -> bool {
         !NON_SOLID_BLOCKS.contains(&mat) && !FLUID_BLOCKS.contains(&mat)
     }

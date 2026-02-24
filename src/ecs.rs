@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use cgmath::{Vector3, Quaternion, InnerSpace, Zero};
 use std::collections::VecDeque;
 
-use crate::random;
+use crate::{block::{Block, BlockType}, random};
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Transform {
@@ -29,6 +29,7 @@ pub struct Physics {
     pub friction: f32,
     pub gravity_enabled: bool,
     pub on_ground: bool,
+    pub is_swimming: bool,
 }
 
 impl Default for Physics {
@@ -40,6 +41,7 @@ impl Default for Physics {
             friction: 0.9,
             gravity_enabled: true,
             on_ground: false,
+            is_swimming: false,
         }
     }
 }
@@ -275,12 +277,40 @@ impl EcsWorld {
         for chunk in chunks {
             if chunk.pos[0] == chunk_x && chunk.pos[1] == chunk_z {
                 if let Some(block) = chunk.get_block([local_x, local_y, local_z]) {
-                    return !block.is_air();
+                    return !block.is_air() && !block.is_fluid();
                 }
                 return false;
             }
         }
         false
+    }
+
+    fn block_at_point(chunks: &[crate::chunk::Chunk], world_pos: Vector3<f32>) -> BlockType {
+        const CHUNK_X_SIZE: i32 = 16;
+        const CHUNK_Z_SIZE: i32 = 16;
+        
+        let block_pos = [
+            world_pos.x.floor() as i32,
+            world_pos.y.floor() as i32,
+            world_pos.z.floor() as i32,
+        ];
+        
+        let chunk_x = block_pos[0].div_euclid(CHUNK_X_SIZE);
+        let chunk_z = block_pos[2].div_euclid(CHUNK_Z_SIZE);
+        
+        let local_x = block_pos[0].rem_euclid(CHUNK_X_SIZE);
+        let local_y = block_pos[1];
+        let local_z = block_pos[2].rem_euclid(CHUNK_Z_SIZE);
+        
+        for chunk in chunks {
+            if chunk.pos[0] == chunk_x && chunk.pos[1] == chunk_z {
+                if let Some(block) = chunk.get_block([local_x, local_y, local_z]) {
+                    return block.mat;
+                }
+                return 0;
+            }
+        }
+        0
     }
 
     fn check_collision(chunks: &[crate::chunk::Chunk], position: Vector3<f32>, collider: &Collider) -> bool {
@@ -311,7 +341,7 @@ impl EcsWorld {
                 return true;
             }
         }
-        
+
         false
     }
     
@@ -331,7 +361,7 @@ impl EcsWorld {
 
                 let move_dir = forward_dir * forward + right_dir * right;
 
-                let is_jumping = input.jump && physics.on_ground;
+                let is_jumping = input.jump && (physics.on_ground || physics.is_swimming);
                 if is_jumping {
                     physics.velocity.y = 8.0;
                     physics.on_ground = false;
@@ -344,6 +374,12 @@ impl EcsWorld {
                         physics.velocity.z = normalized.z * input.movement_speed;
                     }
                     physics.friction = 0.85;
+                } else if physics.is_swimming {
+                    if move_dir.magnitude2() > 0.01 {
+                        let normalized = move_dir.normalize();
+                        physics.velocity.x = normalized.x * input.movement_speed / 2.0;
+                        physics.velocity.z = normalized.z * input.movement_speed / 2.0;
+                    }
                 } else {
                     if move_dir.magnitude2() > 0.01 {
                         let wish_dir = move_dir.normalize();
@@ -401,12 +437,9 @@ impl EcsWorld {
                 transform.position.y += physics.velocity.y * dt;
                 let y_collision = Self::check_collision(chunks, transform.position, collider);
                 if y_collision {
-                    let was_falling = physics.velocity.y < 0.0;
                     transform.position.y = old_pos.y;
                     physics.velocity.y = 0.0;
-                    if was_falling {
-                        physics.on_ground = true;
-                    }
+                    physics.on_ground = true;
                 } else {
                     physics.on_ground = false;
                 }
@@ -427,6 +460,10 @@ impl EcsWorld {
                     physics.velocity.y = 0.0;
                     physics.on_ground = true;
                 }
+
+                let mut upper_block = transform.position;
+                upper_block.y = upper_block.y + 1.5;
+                physics.is_swimming = Block::is_blocktype_fluid(Self::block_at_point(chunks, upper_block));
 
                 if !transform.position.x.is_finite()
                     || !transform.position.y.is_finite()
@@ -657,6 +694,10 @@ impl EcsWorld {
                             }
                         }
                     }
+                }
+
+                if physics.is_swimming {
+                    physics.velocity.y = 5.0;
                 }
             }
         }
