@@ -438,8 +438,10 @@ impl EcsWorld {
                 let y_collision = Self::check_collision(chunks, transform.position, collider);
                 if y_collision {
                     transform.position.y = old_pos.y;
+                    if physics.velocity.y <= 0.0 {
+                        physics.on_ground = true;
+                    }
                     physics.velocity.y = 0.0;
-                    physics.on_ground = true;
                 } else {
                     physics.on_ground = false;
                 }

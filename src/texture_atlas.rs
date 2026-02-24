@@ -90,8 +90,8 @@ impl TextureAtlas {
 
         let u0 = x * tex_size + half;
         let u1 = (x + 1.0) * tex_size - half;
-        let v0 = y * tex_size + half;
-        let v1 = (y + 1.0) * tex_size - half;
+        let v0 = (y + 1.0) * tex_size - half;
+        let v1 = y * tex_size + half;
 
         [
             [u0, v1],

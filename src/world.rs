@@ -305,7 +305,7 @@ impl World {
         let mut chunks = Vec::new();
         let mut chunk_buffers = Vec::new();
 
-        const WORLD_SIZE: i32 = 3;
+        const WORLD_SIZE: i32 = 5;
 
         for x in -WORLD_SIZE..WORLD_SIZE {
             for y in -WORLD_SIZE..WORLD_SIZE {
