@@ -126,17 +126,16 @@ impl InstanceRaw {
     }
 }
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-);
-
-const ROTATION_SPEED: f32 = (2.0 * std::f32::consts::PI / 60.0) / 100.0;
-
 //TEMP
 const INV_SIZE: u32 = 256;
+
+pub enum GameStates {
+    MainMenu,
+    Options,
+    WorldSelection,
+    InGame,
+    PauseMenu,
+}
 
 pub struct State {
     egui_renderer: gui::EguiRenderer,
@@ -168,9 +167,6 @@ pub struct State {
 
     // camera_controller: CameraController,
     // camera_controller: camera::CameraController,
-
-    instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
 
     depth_texture: texture::Texture,
 
@@ -678,39 +674,6 @@ impl State {
                 cache: None,
             });
 
-        const SPACE_BETWEEN: f32 = 3.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-                    let position = cgmath::Vector3 { x: x, y: 100.0, z: z };
-
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
-
-                    Instance {
-                        position: position,
-                        rotation: rotation,
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
         let obj_model =
             resources::load_model("steve.obj", &device, &queue, &texture_bind_group_layout)
                 .await
@@ -1058,8 +1021,6 @@ impl State {
             camera_buffer,
             camera_bind_group,
             // camera_controller,
-            instances,
-            instance_buffer,
             depth_texture,
             obj_model,
             loaded_models,
@@ -1324,22 +1285,6 @@ impl State {
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
-        );
-
-        for instance in &mut self.instances {
-            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
-            let current = instance.rotation;
-            instance.rotation = amount * current;
-        }
-        let instance_data = self
-            .instances
-            .iter()
-            .map(Instance::to_raw)
-            .collect::<Vec<_>>();
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&instance_data),
         );
 
         self.net_tick_accumulator += dt_secs;
@@ -1645,26 +1590,9 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.model_rendering_pipeline);
-            
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            
+
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            
-            for i in 0..self.obj_model.meshes.len() {
-                use model::DrawModel;
-
-                let mesh = &self.obj_model.meshes[i];
-                let material = &self.obj_model.materials[mesh.material];
-
-                render_pass.draw_mesh_instanced(
-                    mesh,
-                    material,
-                    0..self.instances.len() as u32,
-                    // 0..1,
-                    &self.camera_bind_group,
-                );
-            }
 
             for (model_name, (buffer, instance_count)) in &entity_buffers {
                 render_pass.set_vertex_buffer(1, buffer.slice(..));
