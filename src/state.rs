@@ -16,7 +16,12 @@ pub(crate) fn create_wboit_textures(
     device: &wgpu::Device,
     width: u32,
     height: u32,
-) -> (wgpu::Texture, wgpu::TextureView, wgpu::Texture, wgpu::TextureView) {
+) -> (
+    wgpu::Texture,
+    wgpu::TextureView,
+    wgpu::Texture,
+    wgpu::TextureView,
+) {
     let size = wgpu::Extent3d {
         width: width.max(1),
         height: height.max(1),
@@ -150,9 +155,13 @@ impl State {
         };
 
         let diffuse_bytes = include_bytes!("../img/texture_atlas.png");
-        let diffuse_texture =
-            crate::texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "texture_atlas.png")
-                .unwrap();
+        let diffuse_texture = crate::texture::Texture::from_bytes(
+            &device,
+            &queue,
+            diffuse_bytes,
+            "texture_atlas.png",
+        )
+        .unwrap();
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -417,51 +426,50 @@ impl State {
                 push_constant_ranges: &[],
             });
 
-        let composite_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("WBOIT Composite Pipeline"),
-                layout: Some(&composite_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &composite_shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &composite_shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::SrcAlpha,
-                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent::REPLACE,
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
+        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("WBOIT Composite Pipeline"),
+            layout: Some(&composite_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &composite_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &composite_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
 
         let egui_renderer = crate::gui::EguiRenderer::new(&device, config.format, None, 1, &window);
 
@@ -517,7 +525,10 @@ impl State {
                 vertex: wgpu::VertexState {
                     module: &particle_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[crate::particles::ParticleVertex::desc(), InstanceRaw::desc()],
+                    buffers: &[
+                        crate::particles::ParticleVertex::desc(),
+                        InstanceRaw::desc(),
+                    ],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -652,25 +663,24 @@ impl State {
                 ..Default::default()
             });
 
-            self.composite_bind_group =
-                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("WBOIT Composite BG"),
-                    layout: &self.composite_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::Sampler(&wboit_sampler),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&self.wboit_accum_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(&self.wboit_reveal_view),
-                        },
-                    ],
-                });
+            self.composite_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("WBOIT Composite BG"),
+                layout: &self.composite_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Sampler(&wboit_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&self.wboit_accum_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&self.wboit_reveal_view),
+                    },
+                ],
+            });
         }
     }
 
@@ -679,7 +689,9 @@ impl State {
             MouseButton::Left => {
                 self.mouse_pressed = pressed;
                 if pressed {
-                    let show_inventory = self.game.as_ref()
+                    let show_inventory = self
+                        .game
+                        .as_ref()
                         .map(|g| g.player.show_inventory)
                         .unwrap_or(true);
                     if self.game.is_some() && !show_inventory {
@@ -700,9 +712,7 @@ impl State {
                             use winit::window::CursorGrabMode;
                             self.window
                                 .set_cursor_grab(CursorGrabMode::Confined)
-                                .or_else(|_e| {
-                                    self.window.set_cursor_grab(CursorGrabMode::Locked)
-                                })
+                                .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked))
                                 .unwrap();
 
                             let size = self.window.inner_size();
@@ -715,8 +725,7 @@ impl State {
                         }
 
                         if let Some(game) = &mut self.game {
-                            if let Some(pos) =
-                                game.player.get_block_pointed_at(&game.world.chunks)
+                            if let Some(pos) = game.player.get_block_pointed_at(&game.world.chunks)
                             {
                                 if let Some(block_type) =
                                     game.world.break_block(&self.device, &self.queue, pos)
@@ -744,18 +753,18 @@ impl State {
                                         }
 
                                         for _ in 0..8 {
-                                            let r1 = crate::random::get_random_f32_normalized()
-                                                .unwrap();
-                                            let r2 = crate::random::get_random_f32_normalized()
-                                                .unwrap();
-                                            let r3 = crate::random::get_random_f32_normalized()
-                                                .unwrap();
-                                            let r4 = crate::random::get_random_f32_normalized()
-                                                .unwrap();
-                                            let r5 = crate::random::get_random_f32_normalized()
-                                                .unwrap();
-                                            let r6 = crate::random::get_random_f32_normalized()
-                                                .unwrap();
+                                            let r1 =
+                                                crate::random::get_random_f32_normalized().unwrap();
+                                            let r2 =
+                                                crate::random::get_random_f32_normalized().unwrap();
+                                            let r3 =
+                                                crate::random::get_random_f32_normalized().unwrap();
+                                            let r4 =
+                                                crate::random::get_random_f32_normalized().unwrap();
+                                            let r5 =
+                                                crate::random::get_random_f32_normalized().unwrap();
+                                            let r6 =
+                                                crate::random::get_random_f32_normalized().unwrap();
 
                                             let particle_pos = cgmath::Vector3::new(
                                                 pos[0] as f32 + 0.5 + r1 * 0.6 - 0.3,
@@ -785,11 +794,10 @@ impl State {
                 self.mouse_pressed = pressed;
                 if pressed {
                     if let Some(game) = &mut self.game {
-                        if let Some(pos) =
-                            game.player.get_block_placement_pos(&game.world.chunks)
-                        {
+                        if let Some(pos) = game.player.get_block_placement_pos(&game.world.chunks) {
                             let block_type = game.player.selected_block;
-                            game.world.place_block(&self.device, &self.queue, pos, block_type);
+                            game.world
+                                .place_block(&self.device, &self.queue, pos, block_type);
 
                             if let Some(client) = &game.net_client {
                                 client.send(&crate::network::ClientMessage::PlaceBlock {
@@ -872,10 +880,14 @@ impl State {
 
 impl State {
     pub(crate) fn update(&mut self, dt: instant::Duration) {
-        let Some(game) = &mut self.game else { return; };
+        let Some(game) = &mut self.game else {
+            return;
+        };
         let dt_secs = dt.as_secs_f32().min(0.1);
 
-        game.player.camera_controller.update_camera(&mut game.player.camera, dt);
+        game.player
+            .camera_controller
+            .update_camera(&mut game.player.camera, dt);
 
         game.ecs_world.update_player_input(
             game.player.camera_controller.amount_forward,
@@ -886,14 +898,12 @@ impl State {
         );
 
         let camera_yaw = game.player.camera.yaw().0;
-        game.ecs_world.update(dt_secs, &game.world.chunks, camera_yaw);
+        game.ecs_world
+            .update(dt_secs, &game.world.chunks, camera_yaw);
 
         if let Some(player_pos) = game.ecs_world.get_player_position() {
-            game.player.camera.position = cgmath::Point3::new(
-                player_pos.x,
-                player_pos.y + 1.6,
-                player_pos.z,
-            );
+            game.player.camera.position =
+                cgmath::Point3::new(player_pos.x, player_pos.y + 1.6, player_pos.z);
         }
 
         game.camera_uniform
@@ -929,14 +939,17 @@ impl State {
         }
 
         if let Some(game) = &mut self.game {
-            game.world.update_chunks(&self.device, &self.queue, player_pos_chunk);
+            game.world
+                .update_chunks(&self.device, &self.queue, player_pos_chunk);
         }
     }
 }
 
 impl State {
     pub(crate) fn handle_multiplayer_action(&mut self, action: crate::gui::MultiplayerAction) {
-        let Some(game) = &mut self.game else { return; };
+        let Some(game) = &mut self.game else {
+            return;
+        };
         match action {
             crate::gui::MultiplayerAction::Host { port } => {
                 #[cfg(not(target_arch = "wasm32"))]
@@ -999,11 +1012,7 @@ impl State {
                     }
                     #[cfg(not(target_arch = "wasm32"))]
                     if let Some(server) = &game.net_server {
-                        let my_id = game
-                            .net_client
-                            .as_ref()
-                            .and_then(|c| c.my_id)
-                            .unwrap_or(0);
+                        let my_id = game.net_client.as_ref().and_then(|c| c.my_id).unwrap_or(0);
                         server.broadcast(&crate::network::ServerMessage::Chat {
                             sender_id: my_id,
                             message: std::mem::take(&mut self.multiplayer_panel.chat_input),
@@ -1016,16 +1025,15 @@ impl State {
     }
 
     fn network_tick(&mut self) {
-        let Some(game) = &mut self.game else { return; };
+        let Some(game) = &mut self.game else {
+            return;
+        };
 
         if let Some(client) = &game.net_client {
             let cam = &game.player.camera;
-            let pos = game
-                .ecs_world
-                .get_player_position()
-                .unwrap_or_else(|| {
-                    cgmath::Vector3::new(cam.position.x, cam.position.y, cam.position.z)
-                });
+            let pos = game.ecs_world.get_player_position().unwrap_or_else(|| {
+                cgmath::Vector3::new(cam.position.x, cam.position.y, cam.position.z)
+            });
             client.send(&crate::network::ClientMessage::PlayerInput {
                 forward: game.player.camera_controller.amount_forward,
                 backward: game.player.camera_controller.amount_backward,
@@ -1086,7 +1094,12 @@ impl State {
                         game.ecs_world.sync_network_entities(&states);
                     }
                 }
-                crate::network::ServerMessage::BlockUpdate { x, y, z, block_type } => {
+                crate::network::ServerMessage::BlockUpdate {
+                    x,
+                    y,
+                    z,
+                    block_type,
+                } => {
                     let game = self.game.as_mut().unwrap();
                     if block_type == 0 {
                         game.world.break_block(&self.device, &self.queue, [x, y, z]);
@@ -1120,10 +1133,7 @@ impl State {
                     let game = self.game.as_ref().unwrap();
                     if let Some(client) = &game.net_client {
                         for [cx, cz] in positions {
-                            client.send(&crate::network::ClientMessage::RequestChunk {
-                                cx,
-                                cz,
-                            });
+                            client.send(&crate::network::ClientMessage::RequestChunk { cx, cz });
                         }
                     }
                 }
@@ -1154,9 +1164,18 @@ impl State {
                                 block_type: 0,
                             });
                         }
-                        crate::network::ClientMessage::PlaceBlock { x, y, z, block_type } => {
-                            game.world
-                                .place_block(&self.device, &self.queue, [x, y, z], block_type);
+                        crate::network::ClientMessage::PlaceBlock {
+                            x,
+                            y,
+                            z,
+                            block_type,
+                        } => {
+                            game.world.place_block(
+                                &self.device,
+                                &self.queue,
+                                [x, y, z],
+                                block_type,
+                            );
                             server.broadcast(&crate::network::ServerMessage::BlockUpdate {
                                 x,
                                 y,
@@ -1171,11 +1190,7 @@ impl State {
                                 let blocks = crate::network::serialize_chunk_blocks(chunk);
                                 server.send_to_client(
                                     ev.player_id,
-                                    &crate::network::ServerMessage::ChunkData {
-                                        cx,
-                                        cz,
-                                        blocks,
-                                    },
+                                    &crate::network::ServerMessage::ChunkData { cx, cz, blocks },
                                 );
                             }
                         }
@@ -1187,15 +1202,13 @@ impl State {
                         }
                         crate::network::ClientMessage::PlayerInput { .. } => {
                             let states = server.player_states_snapshot();
-                            server.broadcast(&crate::network::ServerMessage::PlayerStates(
-                                states,
-                            ));
+                            server.broadcast(&crate::network::ServerMessage::PlayerStates(states));
 
                             let entity_states = game.ecs_world.get_networked_entities_data();
                             if !entity_states.is_empty() {
-                                server.broadcast(
-                                    &crate::network::ServerMessage::EntityStates(entity_states),
-                                );
+                                server.broadcast(&crate::network::ServerMessage::EntityStates(
+                                    entity_states,
+                                ));
                             }
                         }
                     }
@@ -1218,76 +1231,90 @@ impl State {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder =
-            self.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Render Encoder"),
-                });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
 
         if let Some(game) = &mut self.game {
             let entity_render_data = game.ecs_world.get_entities_render_data();
             let mut entities_by_model: std::collections::HashMap<String, Vec<InstanceRaw>> =
                 std::collections::HashMap::new();
             for (pos, rot, model_name) in entity_render_data {
-                let raw = Instance { position: pos, rotation: rot }.to_raw();
+                let raw = Instance {
+                    position: pos,
+                    rotation: rot,
+                }
+                .to_raw();
                 entities_by_model
                     .entry(model_name)
                     .or_insert_with(Vec::new)
                     .push(raw);
             }
-            let mut entity_buffers: std::collections::HashMap<String, (wgpu::Buffer, usize)> =
-                std::collections::HashMap::new();
+            let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
             for (model_name, instances) in &entities_by_model {
-                if !instances.is_empty() {
-                    let buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some(&format!("Entity Instance Buffer: {}", model_name)),
-                                contents: bytemuck::cast_slice(instances),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                    entity_buffers.insert(model_name.clone(), (buffer, instances.len()));
+                if instances.is_empty() {
+                    continue;
                 }
+                let needed = instances.len();
+                let entry = game
+                    .entity_instance_buffers
+                    .entry(model_name.clone())
+                    .or_insert_with(|| {
+                        let cap = (needed as f32 * 1.5) as usize;
+                        let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some(&format!("Entity Instance Buffer: {}", model_name)),
+                            size: cap as u64 * instance_size,
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        });
+                        (buf, cap)
+                    });
+                if needed > entry.1 {
+                    entry.1 = (needed as f32 * 1.5) as usize;
+                    entry.0 = self.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("Entity Instance Buffer: {}", model_name)),
+                        size: entry.1 as u64 * instance_size,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                }
+                self.queue
+                    .write_buffer(&entry.0, 0, bytemuck::cast_slice(instances));
             }
 
             {
-                let mut render_pass =
-                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("Render Pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color {
-                                    r: 0.1,
-                                    g: 0.2,
-                                    b: 0.3,
-                                    a: 1.0,
-                                }),
-                                store: wgpu::StoreOp::Store,
-                            },
-                            depth_slice: None,
-                        })],
-                        depth_stencil_attachment: Some(
-                            wgpu::RenderPassDepthStencilAttachment {
-                                view: &game.depth_texture.view,
-                                depth_ops: Some(wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(1.0),
-                                    store: wgpu::StoreOp::Store,
-                                }),
-                                stencil_ops: None,
-                            },
-                        ),
-                        occlusion_query_set: None,
-                        timestamp_writes: None,
-                    });
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &game.depth_texture.view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                });
 
                 render_pass.set_pipeline(&self.render_pipeline);
-                render_pass.set_bind_group(
-                    0,
-                    &game.world.texture_atlas.diffuse_bind_group,
-                    &[],
-                );
+                render_pass.set_bind_group(0, &game.world.texture_atlas.diffuse_bind_group, &[]);
                 render_pass.set_bind_group(1, &game.camera_bind_group, &[]);
 
                 game.world
@@ -1307,7 +1334,14 @@ impl State {
                 render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
                 render_pass.set_bind_group(1, &game.camera_bind_group, &[]);
 
-                for (model_name, (buffer, instance_count)) in &entity_buffers {
+                for (model_name, instances) in &entities_by_model {
+                    if instances.is_empty() {
+                        continue;
+                    }
+                    let instance_count = instances.len();
+                    let Some((buffer, _)) = game.entity_instance_buffers.get(model_name) else {
+                        continue;
+                    };
                     render_pass.set_vertex_buffer(1, buffer.slice(..));
                     if let Some(model) = game.loaded_models.get(model_name) {
                         for mesh in &model.meshes {
@@ -1318,12 +1352,11 @@ impl State {
                                 wgpu::IndexFormat::Uint32,
                             );
                             render_pass.set_bind_group(0, &material.bind_group, &[]);
-                            render_pass
-                                .set_bind_group(1, &game.camera_bind_group, &[]);
+                            render_pass.set_bind_group(1, &game.camera_bind_group, &[]);
                             render_pass.draw_indexed(
                                 0..mesh.num_elements,
                                 0,
-                                0..*instance_count as u32,
+                                0..instance_count as u32,
                             );
                         }
                     } else {
@@ -1335,12 +1368,11 @@ impl State {
                                 wgpu::IndexFormat::Uint32,
                             );
                             render_pass.set_bind_group(0, &material.bind_group, &[]);
-                            render_pass
-                                .set_bind_group(1, &game.camera_bind_group, &[]);
+                            render_pass.set_bind_group(1, &game.camera_bind_group, &[]);
                             render_pass.draw_indexed(
                                 0..mesh.num_elements,
                                 0,
-                                0..*instance_count as u32,
+                                0..instance_count as u32,
                             );
                         }
                     }
@@ -1423,8 +1455,7 @@ impl State {
                                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                                 render_pass.set_vertex_buffer(
                                     1,
-                                    game.particle_instance_buffer
-                                        .slice(byte_start..byte_end),
+                                    game.particle_instance_buffer.slice(byte_start..byte_end),
                                 );
                                 render_pass.draw_indexed(0..6, 0, 0..count);
                             }
@@ -1434,49 +1465,42 @@ impl State {
             }
 
             {
-                let mut wboit_pass =
-                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("WBOIT Transparent Pass"),
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.wboit_accum_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.wboit_reveal_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                        ],
-                        depth_stencil_attachment: Some(
-                            wgpu::RenderPassDepthStencilAttachment {
-                                view: &game.depth_texture.view,
-                                depth_ops: Some(wgpu::Operations {
-                                    load: wgpu::LoadOp::Load,
-                                    store: wgpu::StoreOp::Discard,
-                                }),
-                                stencil_ops: None,
+                let mut wboit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("WBOIT Transparent Pass"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.wboit_accum_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
                             },
-                        ),
-                        occlusion_query_set: None,
-                        timestamp_writes: None,
-                    });
+                            depth_slice: None,
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.wboit_reveal_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        }),
+                    ],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &game.depth_texture.view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Discard,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                });
 
                 wboit_pass.set_pipeline(&self.wboit_pipeline);
-                wboit_pass.set_bind_group(
-                    0,
-                    &game.world.texture_atlas.diffuse_bind_group,
-                    &[],
-                );
+                wboit_pass.set_bind_group(0, &game.world.texture_atlas.diffuse_bind_group, &[]);
                 wboit_pass.set_bind_group(1, &game.camera_bind_group, &[]);
 
                 game.world
@@ -1579,9 +1603,7 @@ impl State {
                     }
 
                     if game.player.show_inventory {
-                        if let Some(slot) =
-                            crate::gui::draw_inventory_window(ctx, INV_SIZE)
-                        {
+                        if let Some(slot) = crate::gui::draw_inventory_window(ctx, INV_SIZE) {
                             game.player.set_hotbar_slot(slot);
                         }
                     }
@@ -1618,7 +1640,9 @@ impl State {
         is_pressed: bool,
     ) {
         if code == KeyCode::KeyP && is_pressed {
-            let cursor_locked = self.game.as_ref()
+            let cursor_locked = self
+                .game
+                .as_ref()
                 .map(|g| g.player.cursor_locked)
                 .unwrap_or(false);
             if cursor_locked {
@@ -1646,7 +1670,9 @@ impl State {
             return;
         }
 
-        let processed = self.game.as_mut()
+        let processed = self
+            .game
+            .as_mut()
             .map(|g| g.player.process_keyboard(code, is_pressed))
             .unwrap_or(false);
 
@@ -1658,7 +1684,9 @@ impl State {
         }
 
         if is_pressed {
-            let show_inventory = self.game.as_ref()
+            let show_inventory = self
+                .game
+                .as_ref()
                 .map(|g| g.player.show_inventory)
                 .unwrap_or(false);
             if show_inventory {

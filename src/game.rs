@@ -52,6 +52,7 @@ pub struct Game {
     pub(crate) particle_index_buffer: wgpu::Buffer,
     pub(crate) particle_instance_buffer: wgpu::Buffer,
     pub(crate) particle_instance_capacity: usize,
+    pub(crate) entity_instance_buffers: std::collections::HashMap<String, (wgpu::Buffer, usize)>,
     pub(crate) net_client: Option<crate::network::NetClient>,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) net_server: Option<crate::network::NetServer>,
@@ -325,6 +326,7 @@ impl Game {
             particle_index_buffer,
             particle_instance_buffer,
             particle_instance_capacity: MAX_PARTICLES,
+            entity_instance_buffers: std::collections::HashMap::new(),
             net_client: None,
             #[cfg(not(target_arch = "wasm32"))]
             net_server: None,
