@@ -38,6 +38,13 @@ pub enum GameStates {
     PauseMenu,
 }
 
+pub(crate) struct GameEguiResources {
+    pub(crate) pipeline: wgpu::RenderPipeline,
+    pub(crate) texture_bind_group: wgpu::BindGroup,
+    pub(crate) ui_camera_bind_group: wgpu::BindGroup,
+    pub(crate) block_meshes: Vec<(wgpu::Buffer, wgpu::Buffer, u32)>,
+}
+
 pub struct Game {
     pub(crate) player: crate::player::Player,
     pub(crate) camera_uniform: CameraUniform,
@@ -66,9 +73,8 @@ impl Game {
         config: &wgpu::SurfaceConfiguration,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-        egui_renderer: &mut crate::gui::EguiRenderer,
         surface_format: wgpu::TextureFormat,
-    ) -> anyhow::Result<Game> {
+    ) -> anyhow::Result<(Game, GameEguiResources)> {
         let player = crate::player::Player::new([0.0, 100.0, 10.0], config);
 
         let mut camera_uniform = CameraUniform::new();
@@ -282,12 +288,12 @@ impl Game {
             }],
         });
 
-        egui_renderer.set_block_render_resources(
-            ui_render_pipeline,
-            world.texture_atlas.diffuse_bind_group.clone(),
+        let egui_resources = GameEguiResources {
+            pipeline: ui_render_pipeline,
+            texture_bind_group: world.texture_atlas.diffuse_bind_group.clone(),
             ui_camera_bind_group,
             block_meshes,
-        );
+        };
 
         let mut ecs_world = crate::ecs::EcsWorld::new();
         let player_start_pos = cgmath::Vector3::new(0.0, 100.0, 10.0);
@@ -312,7 +318,7 @@ impl Game {
             );
         }
 
-        Ok(Self {
+        Ok((Self {
             player,
             camera_uniform,
             camera_buffer,
@@ -331,6 +337,6 @@ impl Game {
             #[cfg(not(target_arch = "wasm32"))]
             net_server: None,
             net_tick_accumulator: 0.0,
-        })
+        }, egui_resources))
     }
 }

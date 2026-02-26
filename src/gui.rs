@@ -509,6 +509,166 @@ pub fn draw_hotbar(
     }
 }
 
+#[derive(Clone)]
+pub struct AppOptions {
+    pub render_distance: i32,
+    pub mouse_sensitivity: f32,
+    pub fov: f32,
+}
+
+impl Default for AppOptions {
+    fn default() -> Self {
+        Self {
+            render_distance: 8,
+            mouse_sensitivity: 0.4,
+            fov: 45.0,
+        }
+    }
+}
+
+pub enum TitleAction {
+    None,
+    Play,
+    Options,
+    Quit,
+}
+
+pub fn draw_title_screen(ctx: &egui::Context) -> TitleAction {
+    let mut action = TitleAction::None;
+
+    let screen = ctx.content_rect();
+    let center_x = screen.center().x;
+    let total_h = 300.0_f32;
+    let top_y = screen.center().y - total_h / 2.0;
+
+    egui::Area::new(egui::Id::new("title_screen"))
+        .fixed_pos(egui::pos2(center_x - 200.0, top_y))
+        .show(ctx, |ui| {
+            ui.set_width(400.0);
+
+            ui.vertical_centered(|ui| {
+                ui.add_space(10.0);
+
+                ui.label(
+                    egui::RichText::new("BASSICRAFT 2")
+                        .size(52.0)
+                        .strong()
+                        .color(egui::Color32::GRAY),
+                );
+                ui.label(
+                    egui::RichText::new("test")
+                        .size(18.0)
+                        .color(egui::Color32::YELLOW),
+                );
+
+                ui.add_space(40.0);
+
+                let btn_size = egui::vec2(200.0, 45.0);
+
+                if ui
+                    .add_sized(
+                        btn_size,
+                        egui::Button::new(egui::RichText::new("Play").size(20.0)),
+                    )
+                    .clicked()
+                {
+                    action = TitleAction::Play;
+                }
+
+                ui.add_space(10.0);
+
+                if ui
+                    .add_sized(
+                        btn_size,
+                        egui::Button::new(egui::RichText::new("Options").size(20.0)),
+                    )
+                    .clicked()
+                {
+                    action = TitleAction::Options;
+                }
+
+                ui.add_space(10.0);
+
+                #[cfg(not(target_arch = "wasm32"))]
+                if ui
+                    .add_sized(
+                        btn_size,
+                        egui::Button::new(egui::RichText::new("Quit").size(20.0)),
+                    )
+                    .clicked()
+                {
+                    action = TitleAction::Quit;
+                }
+            });
+        });
+
+    action
+}
+
+pub fn draw_options_screen(ctx: &egui::Context, options: &mut AppOptions) -> bool {
+    let mut back = false;
+
+    let screen = ctx.content_rect();
+    let center_x = screen.center().x;
+    let top_y = screen.center().y - 200.0;
+
+    egui::Area::new(egui::Id::new("options_screen"))
+        .fixed_pos(egui::pos2(center_x - 200.0, top_y))
+        .show(ctx, |ui| {
+            ui.set_width(400.0);
+
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new("Options")
+                        .size(36.0)
+                        .strong()
+                        .color(egui::Color32::WHITE),
+                );
+
+                ui.add_space(30.0);
+
+                egui::Grid::new("options_grid")
+                    .num_columns(2)
+                    .spacing([20.0, 14.0])
+                    .show(ui, |ui| {
+                        let max_rd: i32 = if cfg!(target_arch = "wasm32") { 6 } else { 16 };
+
+                        ui.label("Render distance:");
+                        ui.add(
+                            egui::Slider::new(&mut options.render_distance, 1..=max_rd)
+                                .suffix(" chunks"),
+                        );
+                        ui.end_row();
+
+                        ui.label("Mouse sensitivity:");
+                        ui.add(
+                            egui::Slider::new(&mut options.mouse_sensitivity, 0.05..=2.0)
+                                .step_by(0.05),
+                        );
+                        ui.end_row();
+
+                        ui.label("Field of view:");
+                        ui.add(egui::Slider::new(&mut options.fov, 30.0..=120.0).suffix("°"));
+                        ui.end_row();
+                    });
+
+                ui.add_space(30.0);
+
+                if ui
+                    .add_sized(
+                        egui::vec2(200.0, 40.0),
+                        egui::Button::new(egui::RichText::new("← Back").size(18.0)),
+                    )
+                    .clicked()
+                {
+                    back = true;
+                }
+            });
+        });
+
+    back
+}
+
 pub fn draw_crosshair(ctx: &egui::Context, center: egui::Pos2) {
     let crosshair_size = 10.0;
     let crosshair_thickness = 2.0;

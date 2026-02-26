@@ -147,6 +147,13 @@ impl ApplicationHandler<State> for App {
                         log::error!("Unable to render {}", e);
                     }
                 }
+                if state.pending_start_game {
+                    state.pending_start_game = false;
+                    state.start_game();
+                }
+                if state.pending_quit {
+                    event_loop.exit();
+                }
             }
             WindowEvent::MouseInput {
                 state: btn_state,

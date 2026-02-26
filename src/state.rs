@@ -93,6 +93,13 @@ pub struct State {
 
     pub(crate) game: Option<Game>,
     pub(crate) game_state: GameStates,
+    pub(crate) app_options: crate::gui::AppOptions,
+    pub(crate) pending_start_game: bool,
+    pub(crate) pending_quit: bool,
+    // wasm async can't block, game init runs in spawn_local and hands back here
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) pending_game:
+        std::rc::Rc<std::cell::RefCell<Option<(Game, crate::game::GameEguiResources)>>>,
 }
 
 impl State {
@@ -593,26 +600,76 @@ impl State {
             camera_bind_group_layout,
             game: None,
             game_state: GameStates::MainMenu,
+            app_options: crate::gui::AppOptions::default(),
+            pending_start_game: false,
+            pending_quit: false,
+            #[cfg(target_arch = "wasm32")]
+            pending_game: std::rc::Rc::new(std::cell::RefCell::new(None)),
         };
-        // TODO call start_game() from the title screen instead of here :(
-        state.start_game().await;
         Ok(state)
     }
 }
 
 impl State {
-    pub(crate) async fn start_game(&mut self) {
-        let game = Game::new(
-            &self.device,
-            &self.queue,
-            &self.config,
-            &self.texture_bind_group_layout,
-            &self.camera_bind_group_layout,
-            &mut self.egui_renderer,
-            self.config.format,
-        )
-        .await
-        .unwrap();
+    pub(crate) fn start_game(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (game, egui_res) = pollster::block_on(Game::new(
+                &self.device,
+                &self.queue,
+                &self.config,
+                &self.texture_bind_group_layout,
+                &self.camera_bind_group_layout,
+                self.config.format,
+            ))
+            .unwrap();
+            self.apply_game(game, egui_res);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let pending = self.pending_game.clone();
+            let device = self.device.clone();
+            let queue = self.queue.clone();
+            let config = self.config.clone();
+            let tbl = self.texture_bind_group_layout.clone();
+            let cbl = self.camera_bind_group_layout.clone();
+            let fmt = self.config.format;
+            let opts = self.app_options.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let (mut game, egui_res) = Game::new(&device, &queue, &config, &tbl, &cbl, fmt)
+                    .await
+                    .unwrap();
+                game.world.render_distance = opts.render_distance;
+                game.player.camera_controller.sensitivity = opts.mouse_sensitivity;
+                game.player.projection = crate::camera::Projection::new(
+                    config.width,
+                    config.height,
+                    cgmath::Deg(opts.fov),
+                    0.1,
+                    1000.0,
+                );
+                *pending.borrow_mut() = Some((game, egui_res));
+            });
+        }
+    }
+
+    pub(crate) fn apply_game(&mut self, mut game: Game, egui_res: crate::game::GameEguiResources) {
+        game.world.render_distance = self.app_options.render_distance;
+        game.player.camera_controller.sensitivity = self.app_options.mouse_sensitivity;
+        game.player.projection = crate::camera::Projection::new(
+            self.config.width,
+            self.config.height,
+            cgmath::Deg(self.app_options.fov),
+            0.1,
+            1000.0,
+        );
+        self.egui_renderer.set_block_render_resources(
+            egui_res.pipeline,
+            egui_res.texture_bind_group,
+            egui_res.ui_camera_bind_group,
+            egui_res.block_meshes,
+        );
         self.game = Some(game);
         self.game_state = GameStates::InGame;
         self.lock_cursor();
@@ -1222,6 +1279,15 @@ impl State {
     pub(crate) fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
 
+        // game init runs in spawn_local. poll the shared slot here
+        #[cfg(target_arch = "wasm32")]
+        {
+            let ready = self.pending_game.borrow_mut().take();
+            if let Some((game, egui_res)) = ready {
+                self.apply_game(game, egui_res);
+            }
+        }
+
         if !self.is_surface_configured {
             return Ok(());
         }
@@ -1566,6 +1632,10 @@ impl State {
         };
 
         let mut pending_mp_action = crate::gui::MultiplayerAction::None;
+        let mut pending_start = false;
+        let mut pending_options = false;
+        let mut pending_back_to_menu = false;
+        let mut pending_quit = false;
 
         self.egui_renderer.draw(
             &self.device,
@@ -1579,51 +1649,80 @@ impl State {
                 let screen_size = screen_rect.size();
                 let center = screen_rect.center();
 
-                if let Some(game) = &mut self.game {
-                    if !game.player.cursor_locked {
-                        let dir = game.player.camera.direction();
-                        let chunks_loaded = game.world.chunks.len();
-                        crate::gui::draw_stats_window(
-                            ctx,
-                            &crate::gui::GameStats {
-                                pos_x: game.player.camera.position.x,
-                                pos_y: game.player.camera.position.y,
-                                pos_z: game.player.camera.position.z,
-                                dir_x: dir.x,
-                                dir_y: dir.y,
-                                dir_z: dir.z,
-                                selected_block: game.player.selected_block,
-                                chunks_loaded,
-                                cursor_locked: game.player.cursor_locked,
-                            },
-                            &mut game.world.render_distance,
-                        );
-
-                        pending_mp_action = self.multiplayer_panel.draw(ctx);
-                    }
-
-                    if game.player.show_inventory {
-                        if let Some(slot) = crate::gui::draw_inventory_window(ctx, INV_SIZE) {
-                            game.player.set_hotbar_slot(slot);
+                match &self.game_state {
+                    GameStates::MainMenu => match crate::gui::draw_title_screen(ctx) {
+                        crate::gui::TitleAction::Play => pending_start = true,
+                        crate::gui::TitleAction::Options => pending_options = true,
+                        crate::gui::TitleAction::Quit => pending_quit = true,
+                        crate::gui::TitleAction::None => {}
+                    },
+                    GameStates::Options => {
+                        if crate::gui::draw_options_screen(ctx, &mut self.app_options) {
+                            pending_back_to_menu = true;
                         }
                     }
+                    GameStates::InGame => {
+                        if let Some(game) = &mut self.game {
+                            if !game.player.cursor_locked {
+                                let dir = game.player.camera.direction();
+                                let chunks_loaded = game.world.chunks.len();
+                                crate::gui::draw_stats_window(
+                                    ctx,
+                                    &crate::gui::GameStats {
+                                        pos_x: game.player.camera.position.x,
+                                        pos_y: game.player.camera.position.y,
+                                        pos_z: game.player.camera.position.z,
+                                        dir_x: dir.x,
+                                        dir_y: dir.y,
+                                        dir_z: dir.z,
+                                        selected_block: game.player.selected_block,
+                                        chunks_loaded,
+                                        cursor_locked: game.player.cursor_locked,
+                                    },
+                                    &mut game.world.render_distance,
+                                );
 
-                    crate::gui::draw_hotbar(
-                        ctx,
-                        &game.player.hotbar,
-                        game.player.selected_hotbar_slot,
-                        center,
-                        screen_size.y,
-                    );
+                                pending_mp_action = self.multiplayer_panel.draw(ctx);
+                            }
 
-                    if game.player.cursor_locked {
-                        crate::gui::draw_crosshair(ctx, center);
+                            if game.player.show_inventory {
+                                if let Some(slot) = crate::gui::draw_inventory_window(ctx, INV_SIZE)
+                                {
+                                    game.player.set_hotbar_slot(slot);
+                                }
+                            }
+
+                            crate::gui::draw_hotbar(
+                                ctx,
+                                &game.player.hotbar,
+                                game.player.selected_hotbar_slot,
+                                center,
+                                screen_size.y,
+                            );
+
+                            if game.player.cursor_locked {
+                                crate::gui::draw_crosshair(ctx, center);
+                            }
+                        }
                     }
+                    _ => {}
                 }
             },
         );
 
         self.handle_multiplayer_action(pending_mp_action);
+        if pending_start {
+            self.pending_start_game = true;
+        }
+        if pending_options {
+            self.game_state = GameStates::Options;
+        }
+        if pending_back_to_menu {
+            self.game_state = GameStates::MainMenu;
+        }
+        if pending_quit {
+            self.pending_quit = true;
+        }
 
         self.queue.submit(iter::once(encoder.finish()));
         output.present();
