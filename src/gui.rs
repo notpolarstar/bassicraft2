@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use egui::{Context, Visuals, epaint};
-use egui_wgpu::{RendererOptions, ScreenDescriptor};
 use egui_wgpu::Renderer;
+use egui_wgpu::{RendererOptions, ScreenDescriptor};
 
-use egui_winit::State;
-use egui_wgpu::wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 use egui_wgpu::wgpu;
+use egui_wgpu::wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
+use egui_winit::State;
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::winit::window::Window;
 
@@ -15,7 +15,6 @@ pub struct EguiRenderer {
     state: State,
     renderer: Renderer,
     texure_ids: HashMap<String, epaint::TextureId>,
-
     // pub texture_atlas: egui::ImageSource<'static>,
 }
 
@@ -29,8 +28,6 @@ impl EguiRenderer {
     ) -> EguiRenderer {
         let egui_context = Context::default();
         let id = egui_context.viewport_id();
-
-        const BORDER_RADIUS: f32 = 2.0;
 
         let visuals = Visuals {
             // window_rounding: egui::Rounding::same(BORDER_RADIUS),
@@ -60,12 +57,14 @@ impl EguiRenderer {
             // msaa_samples,
         );
 
-        egui_renderer.callback_resources.insert(BlockRenderResources {
-            pipeline: None,
-            texture_bind_group: None,
-            camera_bind_group: None,
-            block_meshes: Vec::new(),
-        });
+        egui_renderer
+            .callback_resources
+            .insert(BlockRenderResources {
+                pipeline: None,
+                texture_bind_group: None,
+                camera_bind_group: None,
+                block_meshes: Vec::new(),
+            });
 
         // egui_extras::install_image_loaders(&egui_context);
 
@@ -92,12 +91,14 @@ impl EguiRenderer {
         camera_bind_group: wgpu::BindGroup,
         block_meshes: Vec<(wgpu::Buffer, wgpu::Buffer, u32)>,
     ) {
-        self.renderer.callback_resources.insert(BlockRenderResources {
-            pipeline: Some(pipeline),
-            texture_bind_group: Some(texture_bind_group),
-            camera_bind_group: Some(camera_bind_group),
-            block_meshes,
-        });
+        self.renderer
+            .callback_resources
+            .insert(BlockRenderResources {
+                pipeline: Some(pipeline),
+                texture_bind_group: Some(texture_bind_group),
+                camera_bind_group: Some(camera_bind_group),
+                block_meshes,
+            });
     }
 
     pub fn draw(
@@ -144,10 +145,10 @@ impl EguiRenderer {
             });
             // SAFETY: This is safe because the render pass is dropped before the encoder
             // The lifetime issue is a bug in egui-wgpu 0.33 that was fixed in later versions
-            let rpass_static = unsafe {
-                std::mem::transmute::<_, &mut wgpu::RenderPass<'static>>(&mut rpass)
-            };
-            self.renderer.render(rpass_static, &tris, &screen_descriptor);
+            let rpass_static =
+                unsafe { std::mem::transmute::<_, &mut wgpu::RenderPass<'static>>(&mut rpass) };
+            self.renderer
+                .render(rpass_static, &tris, &screen_descriptor);
         }
         for x in &full_output.textures_delta.free {
             self.renderer.free_texture(x)
@@ -159,9 +160,11 @@ impl EguiRenderer {
         tex_str: String,
         device: &Device,
         texture: &TextureView,
-        texture_filter: wgpu::FilterMode
+        texture_filter: wgpu::FilterMode,
     ) {
-        let tex_id: epaint::TextureId = self.renderer.register_native_texture(device, texture, texture_filter);
+        let tex_id: epaint::TextureId =
+            self.renderer
+                .register_native_texture(device, texture, texture_filter);
 
         self.texure_ids.insert(tex_str, tex_id);
     }
@@ -214,9 +217,14 @@ pub struct BlockRenderResources {
 
 impl BlockRenderResources {
     pub fn paint(&self, render_pass: &mut wgpu::RenderPass<'_>, block_type: u32) {
-        if let (Some(pipeline), Some(texture_bind_group), Some(camera_bind_group)) = 
-            (&self.pipeline, &self.texture_bind_group, &self.camera_bind_group) {
-            if let Some((vertex_buffer, index_buffer, num_indices)) = self.block_meshes.get(block_type as usize) {
+        if let (Some(pipeline), Some(texture_bind_group), Some(camera_bind_group)) = (
+            &self.pipeline,
+            &self.texture_bind_group,
+            &self.camera_bind_group,
+        ) {
+            if let Some((vertex_buffer, index_buffer, num_indices)) =
+                self.block_meshes.get(block_type as usize)
+            {
                 if *num_indices > 0 {
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(0, texture_bind_group, &[]);
@@ -240,29 +248,29 @@ pub enum MultiplayerAction {
 }
 
 pub struct MultiplayerPanel {
-    pub join_address:  String,
-    pub host_port:     String,
-    pub status:        String,
-    pub is_connected:  bool,
-    pub is_hosting:    bool,
-    pub lan_address:   Option<String>,
-    pub chat_input:    String,
-    pub chat_log:      Vec<(u32, String)>,
-    pub my_id:         Option<u32>,
+    pub join_address: String,
+    pub host_port: String,
+    pub status: String,
+    pub is_connected: bool,
+    pub is_hosting: bool,
+    pub lan_address: Option<String>,
+    pub chat_input: String,
+    pub chat_log: Vec<(u32, String)>,
+    pub my_id: Option<u32>,
 }
 
 impl Default for MultiplayerPanel {
     fn default() -> Self {
         Self {
             join_address: "ws://127.0.0.1:7777".to_string(),
-            host_port:    "7777".to_string(),
-            status:       "Not connected".to_string(),
+            host_port: "7777".to_string(),
+            status: "Not connected".to_string(),
             is_connected: false,
-            is_hosting:   false,
-            lan_address:  None,
-            chat_input:   String::new(),
-            chat_log:     Vec::new(),
-            my_id:        None,
+            is_hosting: false,
+            lan_address: None,
+            chat_input: String::new(),
+            chat_log: Vec::new(),
+            my_id: None,
         }
     }
 }
@@ -358,8 +366,8 @@ impl MultiplayerPanel {
 
     pub fn on_connected(&mut self, my_id: u32) {
         self.is_connected = true;
-        self.my_id        = Some(my_id);
-        self.status       = format!("Connected (ID {})", my_id);
+        self.my_id = Some(my_id);
+        self.status = format!("Connected (ID {})", my_id);
     }
 
     pub fn push_chat(&mut self, sender_id: u32, message: String) {
@@ -417,7 +425,11 @@ pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats, render_distance
             ui.separator();
             ui.label(format!(
                 "Cursor: {}",
-                if stats.cursor_locked { "Locked" } else { "Unlocked" }
+                if stats.cursor_locked {
+                    "Locked"
+                } else {
+                    "Unlocked"
+                }
             ));
         });
 }
