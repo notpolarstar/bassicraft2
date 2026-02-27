@@ -169,6 +169,10 @@ impl EguiRenderer {
         self.texure_ids.insert(tex_str, tex_id);
     }
 
+    pub fn get_texture_id(&self, name: &str) -> Option<epaint::TextureId> {
+        self.texure_ids.get(name).copied()
+    }
+
     pub fn custom_painting(&mut self, ui: &mut egui::Ui) {
         let (rect, _response) =
             ui.allocate_exact_size(egui::Vec2::splat(300.0), egui::Sense::drag());
@@ -419,7 +423,7 @@ pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats, render_distance
             ui.label("  Mouse - Look around");
             ui.label("  Left Click - Break block");
             ui.label("  Right Click - Place block");
-            ui.label("  M - Spawn following mob");
+            ui.label("  X - Spawn following mob");
             ui.label("  P - Toggle cursor lock");
             ui.label("  ESC - Exit");
             ui.separator();
@@ -434,58 +438,239 @@ pub fn draw_stats_window(ctx: &egui::Context, stats: &GameStats, render_distance
         });
 }
 
-pub fn draw_inventory_window(ctx: &egui::Context, inv_size: u32) -> Option<u32> {
-    let mut clicked: Option<u32> = None;
-    egui::Window::new("Inventory")
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+const INV_SCALE: f32 = 3.0;
+const INV_BG_W: f32 = 176.0;
+const INV_BG_H: f32 = 166.0;
+const INV_TEX_W: f32 = 256.0;
+const INV_TEX_H: f32 = 256.0;
+const SLOT_SRC: f32 = 18.0;
+
+fn slot_screen_rect(origin: egui::Pos2, src_x: f32, src_y: f32) -> egui::Rect {
+    let s = INV_SCALE;
+    egui::Rect::from_min_size(
+        egui::pos2(origin.x + src_x * s, origin.y + src_y * s),
+        egui::vec2(SLOT_SRC * s, SLOT_SRC * s),
+    )
+}
+
+fn draw_item_in_slot(
+    painter: &egui::Painter,
+    ui: &egui::Ui,
+    slot_rect: egui::Rect,
+    item: crate::player::ItemStack,
+) {
+    if item.is_empty() {
+        return;
+    }
+    let border = INV_SCALE;
+    let inner = slot_rect.shrink(border);
+    painter.add(egui_wgpu::Callback::new_paint_callback(
+        inner,
+        CustomBlockCallback {
+            block_type: item.item_id.saturating_sub(1),
+        },
+    ));
+    if item.count > 1 {
+        let font = egui::FontId::proportional(INV_SCALE * 4.5);
+        painter.text(
+            inner.max - egui::vec2(1.0, 0.0),
+            egui::Align2::RIGHT_BOTTOM,
+            format!("{}", item.count),
+            font,
+            egui::Color32::WHITE,
+        );
+    }
+    let _ = ui;
+}
+
+fn apply_left_click(slot: &mut crate::player::ItemStack, held: &mut crate::player::ItemStack) {
+    use crate::player::ItemStack;
+    match (slot.is_empty(), held.is_empty()) {
+        (_, true) => std::mem::swap(slot, held),
+        (true, false) => std::mem::swap(slot, held),
+        (false, false) => {
+            if slot.item_id == held.item_id {
+                let leftover = slot.merge(*held);
+                *held = if leftover == 0 {
+                    ItemStack::EMPTY
+                } else {
+                    ItemStack::new(held.item_id, leftover)
+                };
+            } else {
+                std::mem::swap(slot, held);
+            }
+        }
+    }
+}
+
+fn apply_right_click(slot: &mut crate::player::ItemStack, held: &mut crate::player::ItemStack) {
+    use crate::player::ItemStack;
+    if held.is_empty() {
+        if !slot.is_empty() {
+            let half = (slot.count + 1) / 2;
+            *held = ItemStack::new(slot.item_id, half);
+            slot.count -= half;
+            if slot.count == 0 {
+                *slot = ItemStack::EMPTY;
+            }
+        }
+    } else if slot.is_empty() {
+        *slot = ItemStack::new(held.item_id, 1);
+        held.count -= 1;
+        if held.count == 0 {
+            *held = ItemStack::EMPTY;
+        }
+    } else if slot.item_id == held.item_id && slot.count < 64 {
+        slot.count += 1;
+        held.count -= 1;
+        if held.count == 0 {
+            *held = ItemStack::EMPTY;
+        }
+    } else {
+        std::mem::swap(slot, held);
+    }
+}
+
+pub fn draw_inventory_window(
+    ctx: &egui::Context,
+    inv_tex: Option<egui::TextureId>,
+    inventory: &mut [crate::player::ItemStack; 36],
+    craft_input: &mut [crate::player::ItemStack; 4],
+    craft_output: &mut crate::player::ItemStack,
+    held_item: &mut crate::player::ItemStack,
+) {
+    let scale = INV_SCALE;
+    let bg_w = INV_BG_W * scale;
+    let bg_h = INV_BG_H * scale;
+
+    egui::Window::new("##inventory_window")
+        .title_bar(false)
         .resizable(false)
         .collapsible(false)
+        .frame(egui::Frame::new().fill(egui::Color32::TRANSPARENT))
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .fixed_size(egui::vec2(bg_w, bg_h))
         .show(ctx, |ui| {
-            ui.add_space(5.0);
-            egui::ScrollArea::vertical()
-                .max_height(500.0)
-                .show(ui, |ui| {
-                    egui::Grid::new("Inventory")
-                        .num_columns(8)
-                        .spacing([5.0, 5.0])
-                        .show(ui, |ui| {
-                            for i in 0..inv_size {
-                                egui::Frame::canvas(ui.style())
-                                    .inner_margin(2.0)
-                                    .show(ui, |ui| {
-                                        let (rect, response) = ui.allocate_exact_size(
-                                            egui::Vec2::splat(60.0),
-                                            egui::Sense::click(),
-                                        );
-                                        if response.clicked() {
-                                            clicked = Some(i + 1); // 0 is air
-                                        }
-                                        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                                            rect,
-                                            CustomBlockCallback { block_type: i },
-                                        ));
-                                    });
-                                if (i + 1) % 8 == 0 {
-                                    ui.end_row();
-                                }
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(bg_w, bg_h),
+                egui::Sense::hover(),
+            );
+            let painter = ui.painter();
+            let origin = rect.min;
+
+            if let Some(tex) = inv_tex {
+                let uv = egui::Rect::from_min_max(
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2(INV_BG_W / INV_TEX_W, INV_BG_H / INV_TEX_H),
+                );
+                painter.image(tex, rect, uv, egui::Color32::WHITE);
+            } else {
+                painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(198, 198, 198));
+            }
+
+            let mut hover_slots: Vec<egui::Rect> = Vec::new();
+
+            macro_rules! interact_slot {
+                ($item:expr, $src_x:expr, $src_y:expr, $id:expr) => {{
+                    let sr = slot_screen_rect(origin, $src_x, $src_y);
+                    let resp = ui.interact(sr, egui::Id::new($id), egui::Sense::click());
+                    if resp.hovered() {
+                        hover_slots.push(sr);
+                    }
+                    if resp.clicked() {
+                        apply_left_click(&mut $item, held_item);
+                    }
+                    if resp.secondary_clicked() {
+                        apply_right_click(&mut $item, held_item);
+                    }
+                    draw_item_in_slot(painter, ui, sr, $item);
+                }};
+            }
+
+            for r in 0..2usize {
+                for c in 0..2usize {
+                    let idx = r * 2 + c;
+                    let sx = 98.0 + c as f32 * 18.0;
+                    let sy = 18.0 + r as f32 * 18.0;
+                    interact_slot!(craft_input[idx], sx, sy, ("craft_in", idx));
+                }
+            }
+
+            {
+                let sr = slot_screen_rect(origin, 154.0, 28.0);
+                draw_item_in_slot(painter, ui, sr, *craft_output);
+                let resp = ui.interact(sr, egui::Id::new("craft_out"), egui::Sense::click());
+                if resp.clicked() && !craft_output.is_empty() && held_item.is_empty() {
+                    *held_item = *craft_output;
+                    *craft_output = crate::player::ItemStack::EMPTY;
+                    for ci in craft_input.iter_mut() {
+                        if !ci.is_empty() {
+                            ci.count = ci.count.saturating_sub(1);
+                            if ci.count == 0 {
+                                *ci = crate::player::ItemStack::EMPTY;
                             }
-                        });
-                });
+                        }
+                    }
+                }
+            }
+
+            for row in 0..3usize {
+                for col in 0..9usize {
+                    let inv_idx = 9 + row * 9 + col;
+                    let sx = 8.0 + col as f32 * 18.0;
+                    let sy = 84.0 + row as f32 * 18.0;
+                    interact_slot!(inventory[inv_idx], sx, sy, ("main", inv_idx));
+                }
+            }
+
+            for col in 0..9usize {
+                let sx = 8.0 + col as f32 * 18.0;
+                interact_slot!(inventory[col], sx, 142.0, ("hotbar", col));
+            }
+
+            for sr in hover_slots {
+                painter.rect_filled(sr, 0.0, egui::Color32::from_white_alpha(80));
+            }
         });
-    clicked
+
+    if !held_item.is_empty() {
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::new("held_item"),
+        ));
+        if let Some(pos) = ctx.pointer_hover_pos() {
+            let size = SLOT_SRC * INV_SCALE;
+            let rect = egui::Rect::from_center_size(pos, egui::vec2(size, size));
+            painter.add(egui_wgpu::Callback::new_paint_callback(
+                rect,
+                CustomBlockCallback {
+                    block_type: held_item.item_id.saturating_sub(1),
+                },
+            ));
+            if held_item.count > 1 {
+                painter.text(
+                    rect.max - egui::vec2(2.0, 0.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    format!("{}", held_item.count),
+                    egui::FontId::proportional(INV_SCALE * 4.5),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+    }
 }
 
 pub fn draw_hotbar(
     ctx: &egui::Context,
-    hotbar: &[u32; 8],
+    inventory: &[crate::player::ItemStack; 36],
     selected_slot: usize,
     center: egui::Pos2,
     screen_height: f32,
 ) {
-    for i in 0..8 {
+    for i in 0..crate::player::HOTBAR_SIZE {
         egui::Area::new(egui::Id::new(format!("inv_slot {}", i)))
             .fixed_pos(egui::pos2(
-                center.x - 64.0 * (8.0_f32 / 2.0) + 64.0 * i as f32,
+                center.x - 64.0 * (crate::player::HOTBAR_SIZE as f32 / 2.0) + 64.0 * i as f32,
                 screen_height - 60.0,
             ))
             .show(ctx, |ui| {
@@ -497,13 +682,24 @@ pub fn draw_hotbar(
                 frame.show(ui, |ui| {
                     let (rect, _response) =
                         ui.allocate_exact_size(egui::Vec2::splat(55.0), egui::Sense::empty());
-                    ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                        rect,
-                        // 0 is air
-                        CustomBlockCallback {
-                            block_type: hotbar[i].saturating_sub(1),
-                        },
-                    ));
+                    let item = inventory[i];
+                    if !item.is_empty() {
+                        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                            rect,
+                            CustomBlockCallback {
+                                block_type: item.item_id.saturating_sub(1),
+                            },
+                        ));
+                        if item.count > 1 {
+                            ui.painter().text(
+                                rect.max - egui::vec2(2.0, 0.0),
+                                egui::Align2::RIGHT_BOTTOM,
+                                format!("{}", item.count),
+                                egui::FontId::proportional(12.0),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    }
                 });
             });
     }

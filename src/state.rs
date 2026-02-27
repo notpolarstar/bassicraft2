@@ -9,7 +9,7 @@ use winit::{
 };
 
 use crate::game::{Game, GameStates};
-use crate::instance::{INV_SIZE, Instance, InstanceRaw};
+use crate::instance::{Instance, InstanceRaw};
 use crate::model::Vertex;
 
 pub(crate) fn create_wboit_textures(
@@ -670,6 +670,12 @@ impl State {
             egui_res.ui_camera_bind_group,
             egui_res.block_meshes,
         );
+        self.egui_renderer.register_wgpu_texture(
+            "inventory".to_string(),
+            &self.device,
+            &egui_res.inv_texture.view,
+            wgpu::FilterMode::Nearest,
+        );
         self.game = Some(game);
         self.game_state = GameStates::InGame;
         self.lock_cursor();
@@ -788,6 +794,7 @@ impl State {
                                     game.world.break_block(&self.device, &self.queue, pos)
                                 {
                                     if block_type != 0 {
+                                        game.player.pick_up(block_type, 1);
                                         if let Some(client) = &game.net_client {
                                             client.send(
                                                 &crate::network::ClientMessage::BreakBlock {
@@ -852,26 +859,29 @@ impl State {
                 if pressed {
                     if let Some(game) = &mut self.game {
                         if let Some(pos) = game.player.get_block_placement_pos(&game.world.chunks) {
-                            let block_type = game.player.selected_block;
-                            game.world
-                                .place_block(&self.device, &self.queue, pos, block_type);
+                            let block_type = game.player.selected_block();
+                            if block_type != 0 {
+                                game.world
+                                    .place_block(&self.device, &self.queue, pos, block_type);
+                                game.player.consume_selected();
 
-                            if let Some(client) = &game.net_client {
-                                client.send(&crate::network::ClientMessage::PlaceBlock {
-                                    x: pos[0],
-                                    y: pos[1],
-                                    z: pos[2],
-                                    block_type,
-                                });
-                            }
-                            #[cfg(not(target_arch = "wasm32"))]
-                            if let Some(server) = &game.net_server {
-                                server.broadcast(&crate::network::ServerMessage::BlockUpdate {
-                                    x: pos[0],
-                                    y: pos[1],
-                                    z: pos[2],
-                                    block_type,
-                                });
+                                if let Some(client) = &game.net_client {
+                                    client.send(&crate::network::ClientMessage::PlaceBlock {
+                                        x: pos[0],
+                                        y: pos[1],
+                                        z: pos[2],
+                                        block_type,
+                                    });
+                                }
+                                #[cfg(not(target_arch = "wasm32"))]
+                                if let Some(server) = &game.net_server {
+                                    server.broadcast(&crate::network::ServerMessage::BlockUpdate {
+                                        x: pos[0],
+                                        y: pos[1],
+                                        z: pos[2],
+                                        block_type,
+                                    });
+                                }
                             }
                         }
                     }
@@ -1636,6 +1646,7 @@ impl State {
         let mut pending_options = false;
         let mut pending_back_to_menu = false;
         let mut pending_quit = false;
+        let inv_tex_id = self.egui_renderer.get_texture_id("inventory");
 
         self.egui_renderer.draw(
             &self.device,
@@ -1675,7 +1686,7 @@ impl State {
                                         dir_x: dir.x,
                                         dir_y: dir.y,
                                         dir_z: dir.z,
-                                        selected_block: game.player.selected_block,
+                                        selected_block: game.player.selected_block(),
                                         chunks_loaded,
                                         cursor_locked: game.player.cursor_locked,
                                     },
@@ -1686,15 +1697,19 @@ impl State {
                             }
 
                             if game.player.show_inventory {
-                                if let Some(slot) = crate::gui::draw_inventory_window(ctx, INV_SIZE)
-                                {
-                                    game.player.set_hotbar_slot(slot);
-                                }
+                                crate::gui::draw_inventory_window(
+                                    ctx,
+                                    inv_tex_id,
+                                    &mut game.player.inventory,
+                                    &mut game.player.craft_input,
+                                    &mut game.player.craft_output,
+                                    &mut game.player.held_item,
+                                );
                             }
 
                             crate::gui::draw_hotbar(
                                 ctx,
-                                &game.player.hotbar,
+                                &game.player.inventory,
                                 game.player.selected_hotbar_slot,
                                 center,
                                 screen_size.y,

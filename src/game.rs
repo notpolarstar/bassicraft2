@@ -43,6 +43,7 @@ pub(crate) struct GameEguiResources {
     pub(crate) texture_bind_group: wgpu::BindGroup,
     pub(crate) ui_camera_bind_group: wgpu::BindGroup,
     pub(crate) block_meshes: Vec<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    pub(crate) inv_texture: crate::texture::Texture,
 }
 
 pub struct Game {
@@ -288,11 +289,22 @@ impl Game {
             }],
         });
 
+        let inv_bytes = crate::resources::load_binary("inventory.png").await
+            .unwrap_or_else(|_| Vec::new());
+        let inv_texture = if inv_bytes.is_empty() {
+            crate::texture::Texture::from_bytes(device, queue, &[0u8, 0, 0, 0], "inv_fallback")
+                .unwrap()
+        } else {
+            crate::texture::Texture::from_bytes(device, queue, &inv_bytes, "inventory.png")
+                .unwrap()
+        };
+
         let egui_resources = GameEguiResources {
             pipeline: ui_render_pipeline,
             texture_bind_group: world.texture_atlas.diffuse_bind_group.clone(),
             ui_camera_bind_group,
             block_meshes,
+            inv_texture,
         };
 
         let mut ecs_world = crate::ecs::EcsWorld::new();
