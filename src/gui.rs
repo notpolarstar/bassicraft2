@@ -534,8 +534,8 @@ fn apply_right_click(slot: &mut crate::player::ItemStack, held: &mut crate::play
 pub fn draw_inventory_window(
     ctx: &egui::Context,
     inv_tex: Option<egui::TextureId>,
-    inventory: &mut [crate::player::ItemStack; 36],
-    craft_input: &mut [crate::player::ItemStack; 4],
+    inventory: &mut [crate::player::ItemStack; crate::player::INVENTORY_SIZE],
+    craft_input: &mut [crate::player::ItemStack; crate::player::CRAFT_SIZE],
     craft_output: &mut crate::player::ItemStack,
     held_item: &mut crate::player::ItemStack,
 ) {
@@ -551,10 +551,7 @@ pub fn draw_inventory_window(
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .fixed_size(egui::vec2(bg_w, bg_h))
         .show(ctx, |ui| {
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(bg_w, bg_h),
-                egui::Sense::hover(),
-            );
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(bg_w, bg_h), egui::Sense::hover());
             let painter = ui.painter();
             let origin = rect.min;
 
@@ -853,7 +850,7 @@ pub fn draw_options_screen(ctx: &egui::Context, options: &mut AppOptions) -> boo
                 if ui
                     .add_sized(
                         egui::vec2(200.0, 40.0),
-                        egui::Button::new(egui::RichText::new("← Back").size(18.0)),
+                        egui::Button::new(egui::RichText::new("Back").size(18.0)),
                     )
                     .clicked()
                 {

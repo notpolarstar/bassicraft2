@@ -9,9 +9,9 @@ pub struct ItemStack {
     pub count: u8,
 }
 
-const MAX_STACK: u8 = 64;
-const INVENTORY_SIZE: usize = 36;
-const CRAFT_SIZE: usize = 4;
+pub const MAX_STACK: u8 = 64;
+pub const INVENTORY_SIZE: usize = 36;
+pub const CRAFT_SIZE: usize = 4;
 
 impl ItemStack {
     pub const EMPTY: Self = Self { item_id: 0, count: 0 };
