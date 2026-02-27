@@ -55,6 +55,7 @@ pub enum ClientMessage {
     PlaceBlock { x: i32, y: i32, z: i32, block_type: u32 },
     RequestChunk { cx: i32, cz: i32 },
     Chat { message: String },
+    PickupDrop { drop_id: u32 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -71,6 +72,8 @@ pub enum ServerMessage {
     AvailableChunks(Vec<[i32; 2]>),
     PlayerLeft { player_id: u32 },
     Chat { sender_id: u32, message: String },
+    SpawnDrop { drop_id: u32, x: f32, y: f32, z: f32, item_id: u32 },
+    DespawnDrop { drop_id: u32 },
 }
 
 #[cfg(not(target_arch = "wasm32"))]

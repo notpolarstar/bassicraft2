@@ -60,6 +60,9 @@ pub struct Game {
     pub(crate) particle_index_buffer: wgpu::Buffer,
     pub(crate) particle_instance_buffer: wgpu::Buffer,
     pub(crate) particle_instance_capacity: usize,
+    pub(crate) drop_block_meshes: Vec<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    pub(crate) drop_instance_buffer: wgpu::Buffer,
+    pub(crate) drop_instance_capacity: usize,
     pub(crate) entity_instance_buffers: std::collections::HashMap<String, (wgpu::Buffer, usize)>,
     pub(crate) net_client: Option<crate::network::NetClient>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -264,6 +267,63 @@ impl Game {
             block_meshes.push((vertex_buffer, index_buffer, indices.len() as u32));
         }
 
+        let mut drop_block_meshes: Vec<(wgpu::Buffer, wgpu::Buffer, u32)> = Vec::new();
+        for block_type in 0..INV_SIZE {
+            let tex_x = (block_type % 16) as f32 / 16.0;
+            let tex_y = (block_type / 16) as f32 / 16.0;
+            let half = 0.5 / (16.0 * 16.0_f32);
+            let tc = [tex_x + half, tex_y + half, tex_x + 0.0625 - half, tex_y + 0.0625 - half];
+
+            let vertices = vec![
+                BlockVertex { position: [-0.5, -0.5,  0.5], packed: BlockVertex::pack(tc[0], tc[3], false) },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], packed: BlockVertex::pack(tc[2], tc[3], false) },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], packed: BlockVertex::pack(tc[2], tc[1], false) },
+                BlockVertex { position: [-0.5,  0.5,  0.5], packed: BlockVertex::pack(tc[0], tc[1], false) },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], packed: BlockVertex::pack(tc[0], tc[3], false) },
+                BlockVertex { position: [-0.5, -0.5, -0.5], packed: BlockVertex::pack(tc[2], tc[3], false) },
+                BlockVertex { position: [-0.5,  0.5, -0.5], packed: BlockVertex::pack(tc[2], tc[1], false) },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], packed: BlockVertex::pack(tc[0], tc[1], false) },
+                BlockVertex { position: [-0.5, -0.5, -0.5], packed: BlockVertex::pack(tc[0], tc[3], false) },
+                BlockVertex { position: [-0.5, -0.5,  0.5], packed: BlockVertex::pack(tc[2], tc[3], false) },
+                BlockVertex { position: [-0.5,  0.5,  0.5], packed: BlockVertex::pack(tc[2], tc[1], false) },
+                BlockVertex { position: [-0.5,  0.5, -0.5], packed: BlockVertex::pack(tc[0], tc[1], false) },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], packed: BlockVertex::pack(tc[0], tc[3], false) },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], packed: BlockVertex::pack(tc[2], tc[3], false) },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], packed: BlockVertex::pack(tc[2], tc[1], false) },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], packed: BlockVertex::pack(tc[0], tc[1], false) },
+                BlockVertex { position: [-0.5,  0.5,  0.5], packed: BlockVertex::pack(tc[0], tc[3], false) },
+                BlockVertex { position: [ 0.5,  0.5,  0.5], packed: BlockVertex::pack(tc[2], tc[3], false) },
+                BlockVertex { position: [ 0.5,  0.5, -0.5], packed: BlockVertex::pack(tc[2], tc[1], false) },
+                BlockVertex { position: [-0.5,  0.5, -0.5], packed: BlockVertex::pack(tc[0], tc[1], false) },
+                BlockVertex { position: [-0.5, -0.5, -0.5], packed: BlockVertex::pack(tc[0], tc[3], false) },
+                BlockVertex { position: [ 0.5, -0.5, -0.5], packed: BlockVertex::pack(tc[2], tc[3], false) },
+                BlockVertex { position: [ 0.5, -0.5,  0.5], packed: BlockVertex::pack(tc[2], tc[1], false) },
+                BlockVertex { position: [-0.5, -0.5,  0.5], packed: BlockVertex::pack(tc[0], tc[1], false) },
+            ];
+
+            let indices: Vec<u32> = (0..6u32).flat_map(|i| { let b = i * 4; [b, b+1, b+2, b+2, b+3, b] }).collect();
+
+            let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Drop Block {} Vertex Buffer", block_type)),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Drop Block {} Index Buffer", block_type)),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+            drop_block_meshes.push((vbuf, ibuf, indices.len() as u32));
+        }
+
+        const MAX_DROPS: usize = 256;
+        let drop_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Drop Instance Buffer"),
+            size: (MAX_DROPS * std::mem::size_of::<crate::instance::InstanceRaw>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let ui_camera_pos = Vector3::new(1.5f32, 1.5, 1.5);
         let ui_view = Matrix4::look_at_rh(
             Point3::new(ui_camera_pos.x, ui_camera_pos.y, ui_camera_pos.z),
@@ -344,6 +404,9 @@ impl Game {
             particle_index_buffer,
             particle_instance_buffer,
             particle_instance_capacity: MAX_PARTICLES,
+            drop_block_meshes,
+            drop_instance_buffer,
+            drop_instance_capacity: MAX_DROPS,
             entity_instance_buffers: std::collections::HashMap::new(),
             net_client: None,
             #[cfg(not(target_arch = "wasm32"))]

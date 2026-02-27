@@ -75,6 +75,7 @@ pub struct State {
 
     model_rendering_pipeline: wgpu::RenderPipeline,
     particle_rendering_pipeline: wgpu::RenderPipeline,
+    drop_rendering_pipeline: wgpu::RenderPipeline,
 
     pub(crate) multiplayer_panel: crate::gui::MultiplayerPanel,
 
@@ -212,6 +213,7 @@ impl State {
         let model_shader = device.create_shader_module(wgpu::include_wgsl!("model_shader.wgsl"));
         let particle_shader =
             device.create_shader_module(wgpu::include_wgsl!("particle_shader.wgsl"));
+        let drop_shader = device.create_shader_module(wgpu::include_wgsl!("drop_shader.wgsl"));
 
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -573,6 +575,51 @@ impl State {
                 cache: None,
             });
 
+        let drop_rendering_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Drop Item Render Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &drop_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[crate::block::BlockVertex::desc(), InstanceRaw::desc()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &drop_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: crate::texture::Texture::DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
         let mut state = Self {
             egui_renderer,
             surface,
@@ -587,6 +634,7 @@ impl State {
             mouse_pressed: false,
             model_rendering_pipeline,
             particle_rendering_pipeline,
+            drop_rendering_pipeline,
             multiplayer_panel: crate::gui::MultiplayerPanel::default(),
             wboit_accum_texture,
             wboit_reveal_texture,
@@ -794,7 +842,27 @@ impl State {
                                     game.world.break_block(&self.device, &self.queue, pos)
                                 {
                                     if block_type != 0 {
-                                        game.player.pick_up(block_type, 1);
+                                        let drop_pos = cgmath::Vector3::new(
+                                            pos[0] as f32 + 0.5,
+                                            pos[1] as f32 + 0.3,
+                                            pos[2] as f32 + 0.5,
+                                        );
+                                        let is_host_or_solo = game.net_client.is_none() || {
+                                            #[cfg(not(target_arch = "wasm32"))]
+                                            { game.net_server.is_some() }
+                                            #[cfg(target_arch = "wasm32")]
+                                            { false }
+                                        };
+                                        let drop_id = if is_host_or_solo {
+                                            let id = game.ecs_world.alloc_net_id();
+                                            crate::ecs::spawn_dropped_item(
+                                                &mut game.ecs_world.world,
+                                                drop_pos,
+                                                block_type,
+                                                id,
+                                            );
+                                            id
+                                        } else { 0 };
                                         if let Some(client) = &game.net_client {
                                             client.send(
                                                 &crate::network::ClientMessage::BreakBlock {
@@ -812,6 +880,15 @@ impl State {
                                                     y: pos[1],
                                                     z: pos[2],
                                                     block_type: 0,
+                                                },
+                                            );
+                                            server.broadcast(
+                                                &crate::network::ServerMessage::SpawnDrop {
+                                                    drop_id,
+                                                    x: drop_pos.x,
+                                                    y: drop_pos.y,
+                                                    z: drop_pos.z,
+                                                    item_id: block_type,
                                                 },
                                             );
                                         }
@@ -968,6 +1045,14 @@ impl State {
         game.ecs_world
             .update(dt_secs, &game.world.chunks, camera_yaw);
 
+        let pending_pickups = game.ecs_world.drain_pending_pickups();
+        for (net_id, item_id) in pending_pickups {
+            game.player.pick_up(item_id, 1);
+            if let Some(client) = &game.net_client {
+                client.send(&crate::network::ClientMessage::PickupDrop { drop_id: net_id });
+            }
+        }
+
         if let Some(player_pos) = game.ecs_world.get_player_position() {
             game.player.camera.position =
                 cgmath::Point3::new(player_pos.x, player_pos.y + 1.6, player_pos.z);
@@ -1074,16 +1159,72 @@ impl State {
             crate::gui::MultiplayerAction::RequestChunks => {
                 let msg = std::mem::take(&mut self.multiplayer_panel.chat_input);
                 if !msg.is_empty() {
-                    if let Some(client) = &game.net_client {
-                        client.send(&crate::network::ClientMessage::Chat { message: msg });
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    if let Some(server) = &game.net_server {
-                        let my_id = game.net_client.as_ref().and_then(|c| c.my_id).unwrap_or(0);
-                        server.broadcast(&crate::network::ServerMessage::Chat {
-                            sender_id: my_id,
-                            message: std::mem::take(&mut self.multiplayer_panel.chat_input),
-                        });
+                    if msg.starts_with("/break ") {
+                        let parts: Vec<&str> = msg[7..].split_whitespace().collect();
+                        if parts.len() >= 3 {
+                            if let (Ok(x), Ok(y), Ok(z)) = (
+                                parts[0].parse::<i32>(),
+                                parts[1].parse::<i32>(),
+                                parts[2].parse::<i32>(),
+                            ) {
+                                if let Some(bt) =
+                                    game.world.break_block(&self.device, &self.queue, [x, y, z])
+                                {
+                                    if bt != 0 {
+                                        let drop_pos = cgmath::Vector3::new(
+                                            x as f32 + 0.5,
+                                            y as f32 + 0.3,
+                                            z as f32 + 0.5,
+                                        );
+                                        let is_host_or_solo = game.net_client.is_none() || {
+                                            #[cfg(not(target_arch = "wasm32"))]
+                                            { game.net_server.is_some() }
+                                            #[cfg(target_arch = "wasm32")]
+                                            { false }
+                                        };
+                                        let drop_id = if is_host_or_solo {
+                                            let id = game.ecs_world.alloc_net_id();
+                                            crate::ecs::spawn_dropped_item(
+                                                &mut game.ecs_world.world,
+                                                drop_pos,
+                                                bt,
+                                                id,
+                                            );
+                                            id
+                                        } else { 0 };
+                                        #[cfg(not(target_arch = "wasm32"))]
+                                        if let Some(server) = &game.net_server {
+                                            server.broadcast(
+                                                &crate::network::ServerMessage::BlockUpdate {
+                                                    x, y, z, block_type: 0,
+                                                },
+                                            );
+                                            server.broadcast(
+                                                &crate::network::ServerMessage::SpawnDrop {
+                                                    drop_id,
+                                                    x: drop_pos.x,
+                                                    y: drop_pos.y,
+                                                    z: drop_pos.z,
+                                                    item_id: bt,
+                                                },
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if let Some(client) = &game.net_client {
+                            client.send(&crate::network::ClientMessage::Chat { message: msg });
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some(server) = &game.net_server {
+                            let my_id = game.net_client.as_ref().and_then(|c| c.my_id).unwrap_or(0);
+                            server.broadcast(&crate::network::ServerMessage::Chat {
+                                sender_id: my_id,
+                                message: std::mem::take(&mut self.multiplayer_panel.chat_input),
+                            });
+                        }
                     }
                 }
             }
@@ -1212,6 +1353,21 @@ impl State {
                 crate::network::ServerMessage::Chat { sender_id, message } => {
                     self.multiplayer_panel.push_chat(sender_id, message);
                 }
+                crate::network::ServerMessage::SpawnDrop { drop_id, x, y, z, item_id } => {
+                    let game = self.game.as_mut().unwrap();
+                    if !game.ecs_world.has_drop_net_id(drop_id) {
+                        crate::ecs::spawn_dropped_item_remote(
+                            &mut game.ecs_world.world,
+                            cgmath::Vector3::new(x, y, z),
+                            item_id,
+                            drop_id,
+                        );
+                    }
+                }
+                crate::network::ServerMessage::DespawnDrop { drop_id } => {
+                    let game = self.game.as_mut().unwrap();
+                    game.ecs_world.despawn_dropped_by_net_id(drop_id);
+                }
             }
         }
 
@@ -1223,13 +1379,34 @@ impl State {
                 for ev in events {
                     match ev.message {
                         crate::network::ClientMessage::BreakBlock { x, y, z } => {
-                            game.world.break_block(&self.device, &self.queue, [x, y, z]);
-                            server.broadcast(&crate::network::ServerMessage::BlockUpdate {
-                                x,
-                                y,
-                                z,
-                                block_type: 0,
-                            });
+                            if let Some(bt) = game.world.break_block(&self.device, &self.queue, [x, y, z]) {
+                                let drop_pos = cgmath::Vector3::new(
+                                    x as f32 + 0.5,
+                                    y as f32 + 0.3,
+                                    z as f32 + 0.5,
+                                );
+                                let drop_id = game.ecs_world.alloc_net_id();
+                                if bt != 0 {
+                                    crate::ecs::spawn_dropped_item(
+                                        &mut game.ecs_world.world,
+                                        drop_pos,
+                                        bt,
+                                        drop_id,
+                                    );
+                                }
+                                server.broadcast(&crate::network::ServerMessage::BlockUpdate {
+                                    x, y, z, block_type: 0,
+                                });
+                                if bt != 0 {
+                                    server.broadcast(&crate::network::ServerMessage::SpawnDrop {
+                                        drop_id,
+                                        x: drop_pos.x,
+                                        y: drop_pos.y,
+                                        z: drop_pos.z,
+                                        item_id: bt,
+                                    });
+                                }
+                            }
                         }
                         crate::network::ClientMessage::PlaceBlock {
                             x,
@@ -1266,6 +1443,10 @@ impl State {
                                 sender_id: ev.player_id,
                                 message,
                             });
+                        }
+                        crate::network::ClientMessage::PickupDrop { drop_id } => {
+                            game.ecs_world.despawn_dropped_by_net_id(drop_id);
+                            server.broadcast(&crate::network::ServerMessage::DespawnDrop { drop_id });
                         }
                         crate::network::ClientMessage::PlayerInput { .. } => {
                             let states = server.player_states_snapshot();
@@ -1534,6 +1715,78 @@ impl State {
                                     game.particle_instance_buffer.slice(byte_start..byte_end),
                                 );
                                 render_pass.draw_indexed(0..6, 0, 0..count);
+                            }
+                        }
+                    }
+                }
+
+                let drop_render_data = game.ecs_world.get_dropped_items_render_data();
+                if !drop_render_data.is_empty() {
+                    let mut drops_by_item: std::collections::HashMap<u32, Vec<InstanceRaw>> =
+                        std::collections::HashMap::new();
+                    for (pos, rot, item_id) in &drop_render_data {
+                        let m: [[f32; 4]; 4] = (cgmath::Matrix4::from_translation(*pos)
+                            * cgmath::Matrix4::from(*rot)
+                            * cgmath::Matrix4::from_scale(0.4f32))
+                        .into();
+                        drops_by_item
+                            .entry(*item_id)
+                            .or_default()
+                            .push(InstanceRaw { model: m });
+                    }
+                    let mut all_drop_instances: Vec<InstanceRaw> = Vec::new();
+                    let mut drop_draw_ranges: Vec<(u32, u32, u32)> = Vec::new();
+                    for (item_id, instances) in &drops_by_item {
+                        if instances.is_empty() {
+                            continue;
+                        }
+                        let start = all_drop_instances.len() as u32;
+                        all_drop_instances.extend(instances.iter().copied());
+                        drop_draw_ranges.push((*item_id, start, instances.len() as u32));
+                    }
+                    if !all_drop_instances.is_empty() {
+                        let needed = all_drop_instances.len();
+                        if needed > game.drop_instance_capacity {
+                            game.drop_instance_capacity = (needed as f32 * 1.5) as usize;
+                            game.drop_instance_buffer =
+                                self.device.create_buffer(&wgpu::BufferDescriptor {
+                                    label: Some("Drop Instance Buffer"),
+                                    size: (game.drop_instance_capacity
+                                        * std::mem::size_of::<InstanceRaw>())
+                                        as u64,
+                                    usage: wgpu::BufferUsages::VERTEX
+                                        | wgpu::BufferUsages::COPY_DST,
+                                    mapped_at_creation: false,
+                                });
+                        }
+                        self.queue.write_buffer(
+                            &game.drop_instance_buffer,
+                            0,
+                            bytemuck::cast_slice(&all_drop_instances),
+                        );
+                        let instance_size = std::mem::size_of::<InstanceRaw>() as u64;
+                        render_pass.set_pipeline(&self.drop_rendering_pipeline);
+                        render_pass.set_bind_group(
+                            0,
+                            &game.world.texture_atlas.diffuse_bind_group,
+                            &[],
+                        );
+                        render_pass.set_bind_group(1, &game.camera_bind_group, &[]);
+                        for (item_id, start, count) in drop_draw_ranges {
+                            let mesh_idx = (item_id as usize).saturating_sub(1);
+                            if let Some((vbuf, ibuf, num_idx)) =
+                                game.drop_block_meshes.get(mesh_idx)
+                            {
+                                let byte_start = start as u64 * instance_size;
+                                let byte_end = byte_start + count as u64 * instance_size;
+                                render_pass.set_vertex_buffer(0, vbuf.slice(..));
+                                render_pass.set_vertex_buffer(
+                                    1,
+                                    game.drop_instance_buffer.slice(byte_start..byte_end),
+                                );
+                                render_pass
+                                    .set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                                render_pass.draw_indexed(0..*num_idx, 0, 0..count);
                             }
                         }
                     }

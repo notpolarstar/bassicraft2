@@ -218,6 +218,16 @@ pub fn particle_lifetime_system(
     }
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct DroppedItem {
+    pub item_id: u32,
+    pub net_id: u32,
+    pub spin_angle: f32,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingPickups(pub Vec<(u32, u32)>);
+
 #[derive(Resource, Default)]
 pub struct Time {
     delta: f32,
@@ -243,6 +253,7 @@ impl EcsWorld {
     pub fn new() -> Self {
         let mut world = World::new();
         world.insert_resource(Time::default());
+        world.insert_resource(PendingPickups::default());
         
         let mut schedule = Schedule::default();
 
@@ -707,13 +718,39 @@ impl EcsWorld {
         self.schedule.run(&mut self.world);
 
         {
+            let mut to_pickup: Vec<(Entity, u32, u32)> = Vec::new();
+            {
+                let mut q = self.world.query::<(Entity, &mut Transform, &mut DroppedItem)>();
+                for (entity, mut transform, mut dropped_item) in q.iter_mut(&mut self.world) {
+                    dropped_item.spin_angle += dt * 2.5;
+                    let a = dropped_item.spin_angle;
+                    transform.rotation = Quaternion::new((a * 0.5).cos(), 0.0, (a * 0.5).sin(), 0.0);
+                    let dist2 = (transform.position - player_position).magnitude2();
+                    if dist2 < 1.5 * 1.5 {
+                        to_pickup.push((entity, dropped_item.net_id, dropped_item.item_id));
+                    }
+                }
+            }
+            if !to_pickup.is_empty() {
+                if let Some(mut pickups) = self.world.get_resource_mut::<PendingPickups>() {
+                    for &(_, net_id, item_id) in &to_pickup {
+                        pickups.0.push((net_id, item_id));
+                    }
+                }
+                for (entity, _, _) in to_pickup {
+                    self.world.despawn(entity);
+                }
+            }
+        }
+
+        {
             use std::collections::HashMap;
 
             let dynamic: Vec<(Entity, Vector3<f32>, Collider)> = {
-                let mut q = self.world.query::<(Entity, &Transform, &Physics, &Collider, Option<&Particle>)>();
+                let mut q = self.world.query::<(Entity, &Transform, &Physics, &Collider, Option<&Particle>, Option<&DroppedItem>)>();
                 q.iter(&self.world)
-                    .filter(|(_, _, _, _, p)| p.is_none())
-                    .map(|(e, t, _, c, _)| (e, t.position, *c))
+                    .filter(|(_, _, _, _, p, d)| p.is_none() && d.is_none())
+                    .map(|(e, t, _, c, _, _)| (e, t.position, *c))
                     .collect()
             };
 
@@ -833,6 +870,39 @@ impl EcsWorld {
         }
     }
     
+    pub fn get_dropped_items_render_data(&mut self) -> Vec<(Vector3<f32>, Quaternion<f32>, u32)> {
+        let mut items = Vec::new();
+        let mut query = self.world.query::<(&Transform, &DroppedItem)>();
+        for (transform, dropped_item) in query.iter(&self.world) {
+            items.push((transform.position, transform.rotation, dropped_item.item_id));
+        }
+        items
+    }
+
+    pub fn drain_pending_pickups(&mut self) -> Vec<(u32, u32)> {
+        if let Some(mut pickups) = self.world.get_resource_mut::<PendingPickups>() {
+            std::mem::take(&mut pickups.0)
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn despawn_dropped_by_net_id(&mut self, net_id: u32) {
+        let mut query = self.world.query::<(bevy_ecs::prelude::Entity, &DroppedItem)>();
+        let entity = query
+            .iter(&self.world)
+            .find(|(_, d)| d.net_id == net_id)
+            .map(|(e, _)| e);
+        if let Some(e) = entity {
+            self.world.despawn(e);
+        }
+    }
+
+    pub fn has_drop_net_id(&mut self, net_id: u32) -> bool {
+        let mut query = self.world.query::<&DroppedItem>();
+        query.iter(&self.world).any(|d| d.net_id == net_id)
+    }
+
     pub fn get_entities_render_data(&mut self) -> Vec<(Vector3<f32>, Quaternion<f32>, String)> {
         let mut entities = Vec::new();
         let mut query = self.world.query::<(&Transform, &Model)>();
@@ -1153,4 +1223,47 @@ pub fn spawn_particle(world: &mut World, position: Vector3<f32>, block_type: u32
         },
     ));
     entity.id()
+}
+pub fn spawn_dropped_item(world: &mut World, position: Vector3<f32>, item_id: u32, net_id: u32) {
+    let vx = (random::get_random_f32_normalized().unwrap_or(0.5) - 0.5) * 3.0;
+    let vz = (random::get_random_f32_normalized().unwrap_or(0.5) - 0.5) * 3.0;
+    world.spawn((
+        Transform {
+            position,
+            rotation: Quaternion::new(1.0, 0.0, 0.0, 0.0),
+            scale: Vector3::new(0.4, 0.4, 0.4),
+        },
+        Physics {
+            velocity: Vector3::new(vx, 5.0, vz),
+            acceleration: Vector3::zero(),
+            mass: 1.0,
+            friction: 0.85,
+            gravity_enabled: true,
+            on_ground: false,
+            is_swimming: false,
+        },
+        Collider { width: 0.25, height: 0.25, depth: 0.25 },
+        DroppedItem { item_id, net_id, spin_angle: 0.0 },
+    ));
+}
+
+pub fn spawn_dropped_item_remote(world: &mut World, position: Vector3<f32>, item_id: u32, net_id: u32) {
+    world.spawn((
+        Transform {
+            position,
+            rotation: Quaternion::new(1.0, 0.0, 0.0, 0.0),
+            scale: Vector3::new(0.4, 0.4, 0.4),
+        },
+        Physics {
+            velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
+            mass: 1.0,
+            friction: 0.85,
+            gravity_enabled: true,
+            on_ground: false,
+            is_swimming: false,
+        },
+        Collider { width: 0.25, height: 0.25, depth: 0.25 },
+        DroppedItem { item_id, net_id, spin_angle: 0.0 },
+    ));
 }
